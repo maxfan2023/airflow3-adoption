@@ -1,0 +1,27 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Conda
+.conda/
+conda-meta/
+
+# Airflow runtime artifacts
+airflow.db
+airflow-webserver.pid
+airflow-scheduler.pid
+logs/
+
+# Local environment files
+.env
+.env.*
