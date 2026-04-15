@@ -22,8 +22,10 @@ Usage examples:
      --version 0001.4972.user_name \
      --dry-run
 
-The script always reads Nexus credentials from:
-configs/dag_publish/nexus_credentials.env
+The script reads Nexus credentials from the first existing predefined location:
+1. configs/dag_publish/nexus_credentials.env relative to the repo root
+2. configs/dag_publish/nexus_credentials.env relative to the script directory
+3. nexus_credentials.env in the same directory as this script
 """
 
 import argparse
@@ -37,8 +39,14 @@ from urllib import error, parse, request
 import zipfile
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_CREDENTIALS_FILE = REPO_ROOT / "configs" / "dag_publish" / "nexus_credentials.env"
+SCRIPT_PATH = Path(__file__).resolve()
+SCRIPT_DIR = SCRIPT_PATH.parent
+REPO_ROOT = SCRIPT_DIR.parents[1]
+DEFAULT_CREDENTIALS_CANDIDATES = [
+    REPO_ROOT / "configs" / "dag_publish" / "nexus_credentials.env",
+    SCRIPT_DIR / "configs" / "dag_publish" / "nexus_credentials.env",
+    SCRIPT_DIR / "nexus_credentials.env",
+]
 DEFAULT_NEXUS_REPOSITORY_URL = (
     "https://nexus302.systems.uk.hsbc:8081/nexus/repository/raw-alm-uat_n3p"
 )
@@ -47,6 +55,7 @@ DEFAULT_TIMEOUT_SECONDS = 60
 DEFAULT_ARCHIVE_SEPARATOR = "."
 SKIP_NAMES = {"__pycache__", ".DS_Store", ".git", ".idea"}
 SKIP_SUFFIXES = {".pyc", ".pyo"}
+SURROUNDING_QUOTE_CHARS = {'"', "'", "“", "”", "‘", "’"}
 
 
 def parse_args() -> argparse.Namespace:
@@ -117,6 +126,7 @@ def load_properties(path):
     The file is intentionally parsed with stdlib only so the script can run on
     a minimal RHEL8 host without extra Python packages.
     """
+    path = Path(path).expanduser().resolve()
     if not path.is_file():
         raise ValueError(f"Credentials file does not exist: {path}")
 
@@ -133,12 +143,30 @@ def load_properties(path):
         key, value = line.split("=", 1)
         key = key.strip()
         value = value.strip()
-        if (value.startswith('"') and value.endswith('"')) or (
-            value.startswith("'") and value.endswith("'")
-        ):
+        # Be forgiving when credentials files are edited in rich-text tools or
+        # chat clients that auto-replace ASCII quotes with curly quotes.
+        if len(value) >= 2 and value[0] in SURROUNDING_QUOTE_CHARS and value[-1] in SURROUNDING_QUOTE_CHARS:
             value = value[1:-1]
         properties[key] = value
     return properties
+
+
+def resolve_credentials_file():
+    """Find the predefined credentials file from deployment-safe locations."""
+    for candidate in DEFAULT_CREDENTIALS_CANDIDATES:
+        candidate_path = Path(candidate).expanduser().resolve()
+        if candidate_path.is_file():
+            return candidate_path
+
+    checked_locations = "\n".join(
+        "  - {0}".format(Path(candidate).expanduser().resolve())
+        for candidate in DEFAULT_CREDENTIALS_CANDIDATES
+    )
+    raise ValueError(
+        "Credentials file does not exist in any predefined location. Checked:\n{0}".format(
+            checked_locations
+        )
+    )
 
 
 def parse_bool(value, default=False):
@@ -331,7 +359,7 @@ def main():
     args = parse_args()
 
     try:
-        credentials_file = DEFAULT_CREDENTIALS_FILE
+        credentials_file = resolve_credentials_file()
         properties = load_properties(credentials_file)
         sources = normalize_sources(args.sources)
         artifact_id = derive_artifact_id(sources, args.artifact_id)
