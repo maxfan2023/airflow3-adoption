@@ -10,7 +10,7 @@ This repository is intentionally minimal for the initial setup. We will add envi
 
 - 脚本路径：`scripts/dag_publish/package_and_upload_dag.py`
 - 示例凭据文件：`configs/dag_publish/nexus_credentials.env.example`
-- 程序固定读取的凭据文件：`configs/dag_publish/nexus_credentials.env`
+- 程序会按预定义位置查找凭据文件，优先使用 repo 下的 `configs/dag_publish/nexus_credentials.env`
 
 ### 凭据文件格式
 
@@ -25,7 +25,11 @@ NEXUS_INSECURE=false
 
 说明：
 
-- 脚本默认使用固定的凭据文件路径：`configs/dag_publish/nexus_credentials.env`
+- 脚本会按下面的顺序查找凭据文件：
+  `configs/dag_publish/nexus_credentials.env` 相对 repo 根目录
+  `configs/dag_publish/nexus_credentials.env` 相对脚本目录
+  `nexus_credentials.env` 与脚本同目录
+- 凭据值支持不加引号、普通引号 `"value"` / `'value'`，也兼容中文弯引号 `“value”`
 - 默认 Nexus 仓库根路径是：
   `https://nexus302.systems.uk.hsbc:8081/nexus/repository/raw-alm-uat_n3p`
 - 默认 Nexus 仓库内前缀路径是：
