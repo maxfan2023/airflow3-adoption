@@ -25,3 +25,11 @@ logs/
 # Local environment files
 .env
 .env.*
+
+# IDE and local build outputs
+.idea/
+build/
+
+# DAG publish credentials
+configs/dag_publish/*.env
+!configs/dag_publish/*.env.example
