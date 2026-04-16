@@ -23,9 +23,12 @@ Usage examples:
      --dry-run
 
 The script reads Nexus credentials from the first existing predefined location:
-1. configs/dag_publish/nexus_credentials.env relative to the repo root
-2. configs/dag_publish/nexus_credentials.env relative to the script directory
-3. nexus_credentials.env in the same directory as this script
+1. configs/dag_publish/nexus_credentials.<environment>.env relative to the repo root
+2. configs/dag_publish/nexus_credentials.env relative to the repo root
+3. configs/dag_publish/nexus_credentials.<environment>.env relative to the script directory
+4. configs/dag_publish/nexus_credentials.env relative to the script directory
+5. nexus_credentials.<environment>.env in the same directory as this script
+6. nexus_credentials.env in the same directory as this script
 """
 
 import argparse
@@ -38,15 +41,15 @@ from typing import Dict, List, Set, Tuple
 from urllib import error, parse, request
 import zipfile
 
+from common import (
+    build_default_credentials_candidates,
+    normalize_environment,
+)
+
 
 SCRIPT_PATH = Path(__file__).resolve()
 SCRIPT_DIR = SCRIPT_PATH.parent
 REPO_ROOT = SCRIPT_DIR.parents[1]
-DEFAULT_CREDENTIALS_CANDIDATES = [
-    REPO_ROOT / "configs" / "dag_publish" / "nexus_credentials.env",
-    SCRIPT_DIR / "configs" / "dag_publish" / "nexus_credentials.env",
-    SCRIPT_DIR / "nexus_credentials.env",
-]
 DEFAULT_NEXUS_REPOSITORY_URL = (
     "https://nexus302.systems.uk.hsbc:8081/nexus/repository/raw-alm-uat_n3p"
 )
@@ -76,6 +79,16 @@ def parse_args() -> argparse.Namespace:
         "--version",
         required=True,
         help="Artifact version used in the zip filename and default Nexus object name.",
+    )
+    parser.add_argument(
+        "--environment",
+        choices=("dev", "uat", "prod"),
+        default="dev",
+        help="Target environment used to resolve the default credentials file.",
+    )
+    parser.add_argument(
+        "--credentials-file",
+        help="Override the default environment-specific Nexus credentials file.",
     )
     parser.add_argument(
         "--path-prefix",
@@ -151,16 +164,22 @@ def load_properties(path):
     return properties
 
 
-def resolve_credentials_file():
+def resolve_credentials_file(explicit_path=None, environment=None):
     """Find the predefined credentials file from deployment-safe locations."""
-    for candidate in DEFAULT_CREDENTIALS_CANDIDATES:
+    environment = normalize_environment(environment)
+    candidates = []
+    if explicit_path:
+        candidates.append(Path(explicit_path))
+    candidates.extend(build_default_credentials_candidates(environment))
+
+    for candidate in candidates:
         candidate_path = Path(candidate).expanduser().resolve()
         if candidate_path.is_file():
             return candidate_path
 
     checked_locations = "\n".join(
         "  - {0}".format(Path(candidate).expanduser().resolve())
-        for candidate in DEFAULT_CREDENTIALS_CANDIDATES
+        for candidate in candidates
     )
     raise ValueError(
         "Credentials file does not exist in any predefined location. Checked:\n{0}".format(
@@ -359,7 +378,11 @@ def main():
     args = parse_args()
 
     try:
-        credentials_file = resolve_credentials_file()
+        environment = normalize_environment(args.environment)
+        credentials_file = resolve_credentials_file(
+            explicit_path=args.credentials_file,
+            environment=environment,
+        )
         properties = load_properties(credentials_file)
         sources = normalize_sources(args.sources)
         artifact_id = derive_artifact_id(sources, args.artifact_id)
@@ -393,6 +416,8 @@ def main():
         upload_url = build_upload_url(repository_url, upload_path)
 
         print(f"Archive created: {archive_path}")
+        print(f"Environment: {environment}")
+        print(f"Credentials file: {credentials_file}")
         print(f"SHA256: {archive_sha256}")
         print(f"Upload target: {upload_url}")
 

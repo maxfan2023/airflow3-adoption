@@ -1,0 +1,59 @@
+{
+  "paths": {
+    "working_root": "build/dag_deploy/prod/work",
+    "landing_root": "build/dag_deploy/prod/landing",
+    "dags_root": "build/dag_deploy/prod/dags",
+    "backup_root": "build/dag_deploy/prod/backups"
+  },
+  "nexus": {
+    "repository_url": "https://nexus302.systems.uk.hsbc:8081/nexus/repository/raw-alm-uat_n3p",
+    "timeout_seconds": 60,
+    "verify_tls": true
+  },
+  "archive": {
+    "allowed_suffixes": [
+      ".zip",
+      ".tar.gz",
+      ".tgz"
+    ],
+    "require_single_top_level_dir": true
+  },
+  "checksum": {
+    "mode": "compute_only",
+    "sidecar_suffix": ".sha256"
+  },
+  "imports": {
+    "extra_pythonpath": [],
+    "shell_executable": "/bin/bash",
+    "activation_command": "",
+    "python_executable": "python",
+    "timeout_seconds": 300
+  },
+  "tagging": {
+    "source_variable_name": "source",
+    "managed_tags": [
+      "GDTET_US_DAG",
+      "GDT_ET_GLOBAL_DAG"
+    ],
+    "us_sources": [
+      "camp-us",
+      "ucm",
+      "norkom",
+      "mdmd"
+    ],
+    "us_tag": "GDTET_US_DAG",
+    "global_tag": "GDT_ET_GLOBAL_DAG"
+  },
+  "rules": {
+    "name_rules": {
+      "enabled": false,
+      "allow_patterns": [],
+      "deny_patterns": []
+    },
+    "queue_rules": {
+      "enabled": false,
+      "allow_patterns": [],
+      "deny_patterns": []
+    }
+  }
+}
