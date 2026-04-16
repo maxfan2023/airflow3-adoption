@@ -9,12 +9,21 @@ This repository is intentionally minimal for the initial setup. We will add envi
 针对 “4. DAG 发布与推广流水线”，仓库里新增了一个开发者可直接运行的脚本：
 
 - 脚本路径：`scripts/dag_publish/package_and_upload_dag.py`
-- 示例凭据文件：`configs/dag_publish/nexus_credentials.env.example`
-- 程序会按预定义位置查找凭据文件，优先使用 repo 下的 `configs/dag_publish/nexus_credentials.env`
+- 示例凭据文件：
+  `configs/dag_publish/nexus_credentials.dev.env.example`
+  `configs/dag_publish/nexus_credentials.uat.env.example`
+  `configs/dag_publish/nexus_credentials.prod.env.example`
+- 程序支持 `--environment dev|uat|prod`，会优先查找对应环境的凭据文件
 
 ### 凭据文件格式
 
-先复制一份示例文件为实际凭据文件 `configs/dag_publish/nexus_credentials.env`，然后填入 Nexus 账号密码：
+建议按环境分别复制示例文件为实际凭据文件：
+
+- `configs/dag_publish/nexus_credentials.dev.env`
+- `configs/dag_publish/nexus_credentials.uat.env`
+- `configs/dag_publish/nexus_credentials.prod.env`
+
+然后填入各自环境的 Nexus 账号密码：
 
 ```bash
 NEXUS_USERNAME=your_username
@@ -26,8 +35,11 @@ NEXUS_INSECURE=false
 说明：
 
 - 脚本会按下面的顺序查找凭据文件：
+  `configs/dag_publish/nexus_credentials.<environment>.env` 相对 repo 根目录
   `configs/dag_publish/nexus_credentials.env` 相对 repo 根目录
+  `configs/dag_publish/nexus_credentials.<environment>.env` 相对脚本目录
   `configs/dag_publish/nexus_credentials.env` 相对脚本目录
+  `nexus_credentials.<environment>.env` 与脚本同目录
   `nexus_credentials.env` 与脚本同目录
 - 凭据值支持不加引号、普通引号 `"value"` / `'value'`，也兼容中文弯引号 `“value”`
 - 默认 Nexus 仓库根路径是：
@@ -48,6 +60,7 @@ NEXUS_INSECURE=false
 ```bash
 python3 scripts/dag_publish/package_and_upload_dag.py \
   dags/customer_sync \
+  --environment dev \
   --artifact-id customer-sync \
   --version 1.0.0
 ```
@@ -66,6 +79,7 @@ python3 scripts/dag_publish/package_and_upload_dag.py \
 ```bash
 python3 scripts/dag_publish/package_and_upload_dag.py \
   dags/customer_sync \
+  --environment uat \
   --artifact-id customer-sync \
   --version 1.0.0 \
   --dry-run
@@ -76,6 +90,7 @@ python3 scripts/dag_publish/package_and_upload_dag.py \
 ```bash
 python3 scripts/dag_publish/package_and_upload_dag.py \
   dags/customer_sync \
+  --environment prod \
   --artifact-id DAG_ID_RELEASE \
   --version 0001.4972.user_name
 ```
@@ -87,3 +102,93 @@ com/hsbc/gdt/et/fctm/1646753/CHG123456/<artifact-id>.<version>.zip
 ```
 
 如果公司的 Nexus Raw 仓库路径有特殊要求，可以通过 `--upload-path` 显式指定仓库内路径。
+
+## DAG 从 Nexus 落地并发布到 Airflow dags
+
+仓库里新增了一个部署侧脚本，用来完成以下流水线步骤：
+
+- 下载或接收 DAG 压缩包
+- checksum 计算/校验
+- 安全解包
+- Python 语法检查
+- import 检查
+- DAG `dag_id` / `queue` 规则检查
+- 根据顶层 `source` 变量改写受管 tags
+- 落地到 landing zone
+- 以 backup + rename + rollback 的方式发布到 `dags`
+
+### 主要文件
+
+- 脚本入口：`scripts/dag_publish/deploy_dag_from_nexus.py`
+- 步骤模块：`scripts/dag_publish/deploy_steps/`
+- 本地通用配置：`configs/dag_publish/deploy_pipeline.json`
+- 环境专属配置：
+  `configs/dag_publish/deploy_pipeline.dev.json`
+  `configs/dag_publish/deploy_pipeline.uat.json`
+  `configs/dag_publish/deploy_pipeline.prod.json`
+- 环境专属凭据：
+  `configs/dag_publish/nexus_credentials.dev.env`
+  `configs/dag_publish/nexus_credentials.uat.env`
+  `configs/dag_publish/nexus_credentials.prod.env`
+
+### 使用示例
+
+从本地 zip 做完整校验并发布：
+
+```bash
+python3 scripts/dag_publish/deploy_dag_from_nexus.py \
+  --environment dev \
+  --archive-file build/dag_packages/customer-sync-1.0.0.zip
+```
+
+只做校验，不真正写 landing / dags：
+
+```bash
+python3 scripts/dag_publish/deploy_dag_from_nexus.py \
+  --environment uat \
+  --archive-file build/dag_packages/customer-sync-1.0.0.zip \
+  --dry-run
+```
+
+从 Nexus 仓库内路径下载并发布：
+
+```bash
+python3 scripts/dag_publish/deploy_dag_from_nexus.py \
+  --environment prod \
+  --artifact-path com/hsbc/gdt/et/fctm/1646753/CHG123456/customer-sync-1.0.0.zip
+```
+
+### 配置说明
+
+部署脚本默认会优先读取 `deploy_pipeline.<environment>.json`；如果显式传 `--config`，则使用指定文件。
+
+`configs/dag_publish/deploy_pipeline.<environment>.json` 中可以配置：
+
+- `paths`: `working_root`、`landing_root`、`dags_root`、`backup_root`
+- `nexus`: `repository_url`、`timeout_seconds`、`verify_tls`
+- `archive`: 允许的压缩包后缀，以及是否强制单顶层目录
+- `checksum`: `compute_only`、`sidecar_file`、`cli_value`
+- `imports`: `extra_pythonpath`、`shell_executable`、`activation_command`、`python_executable`、`timeout_seconds`
+- `tagging`: `source` 变量名、US source 列表、受管 tags
+- `rules`: DAG 命名规则和 queue 规则
+
+如果公司环境需要先激活 Miniconda/Conda 才能拿到 Airflow 运行时，请在对应环境配置里填写：
+
+```json
+"imports": {
+  "extra_pythonpath": [],
+  "shell_executable": "/bin/bash",
+  "activation_command": "source /path/to/miniconda3/etc/profile.d/conda.sh && conda activate airflow3_dev",
+  "python_executable": "python",
+  "timeout_seconds": 300
+}
+```
+
+这样即使 `deploy_dag_from_nexus.py` 本身不是在 Airflow 环境里启动，`import` 检查也会自动进入目标 conda 环境后再执行。
+
+### 当前约束
+
+- 只接受解包后“单一顶层目录”的压缩包
+- tag 改写只支持经典 `with DAG(...)` 和 `dag = DAG(...)`
+- `source` 必须是文件顶层字符串常量
+- `tags` 如果存在，必须是字符串字面量 list/tuple
