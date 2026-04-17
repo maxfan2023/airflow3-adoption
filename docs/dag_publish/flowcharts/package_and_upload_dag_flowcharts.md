@@ -2,6 +2,12 @@
 
 ## 1. Execution flow
 
+Draw.io source:
+[package-and-upload-dag-execution-flow.drawio](./package-and-upload-dag-execution-flow.drawio)
+
+Restyled SVG:
+![Execution Flow Draw.io](./package-and-upload-dag-execution-flow.drawio.svg)
+
 Rendered SVG:
 ![Execution Flow](./package_and_upload_dag_execution_flow.svg)
 
@@ -66,6 +72,12 @@ flowchart LR
 ```
 
 ## 2. Validation flow
+
+Draw.io source:
+[package-and-upload-dag-validation-flow.drawio](./package-and-upload-dag-validation-flow.drawio)
+
+Restyled SVG:
+![Validation Flow Draw.io](./package-and-upload-dag-validation-flow.drawio.svg)
 
 Rendered SVG:
 ![Validation Flow](./package_and_upload_dag_validation_flow.svg)
