@@ -1,0 +1,100 @@
+<mxfile host="app.diagrams.net" agent="Codex" version="26.1.0">
+  <diagram id="package-upload-execution" name="Execution Flow">
+    <mxGraphModel dx="1650" dy="980" grid="0" gridSize="10" guides="1" tooltips="1" connect="0" arrows="1" fold="0" page="0" pageScale="1" pageWidth="1680" pageHeight="940" background="#f3f4f4" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="canvas" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f3f4f4;strokeColor=none;" vertex="1" parent="1">
+          <mxGeometry x="0" y="0" width="1680" height="940" as="geometry"/>
+        </mxCell>
+        <mxCell id="frame-cli" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#cfcfd2;strokeWidth=1.4;dashed=1;dashPattern=10 10;arcSize=18;" vertex="1" parent="1">
+          <mxGeometry x="30" y="42" width="450" height="820" as="geometry"/>
+        </mxCell>
+        <mxCell id="frame-validation" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#cfcfd2;strokeWidth=1.4;dashed=1;dashPattern=10 10;arcSize=18;" vertex="1" parent="1">
+          <mxGeometry x="530" y="42" width="540" height="820" as="geometry"/>
+        </mxCell>
+        <mxCell id="frame-package" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#cfcfd2;strokeWidth=1.4;dashed=1;dashPattern=10 10;arcSize=18;" vertex="1" parent="1">
+          <mxGeometry x="1120" y="42" width="500" height="820" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="title-cli" value="CLI session" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=23;fontStyle=2;fontFamily=Helvetica;fontColor=#6b6f76;" vertex="1" parent="1">
+          <mxGeometry x="60" y="72" width="180" height="36" as="geometry"/>
+        </mxCell>
+        <mxCell id="title-validation" value="Validation loop" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=23;fontStyle=2;fontFamily=Helvetica;fontColor=#6b6f76;" vertex="1" parent="1">
+          <mxGeometry x="560" y="72" width="220" height="36" as="geometry"/>
+        </mxCell>
+        <mxCell id="title-package" value="Package + Nexus" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=23;fontStyle=2;fontFamily=Helvetica;fontColor=#6b6f76;" vertex="1" parent="1">
+          <mxGeometry x="1150" y="72" width="240" height="36" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="box-main" value="&lt;b&gt;main()&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:16px;font-weight:400;&quot;&gt;parse_args() + log session&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ebe8fc;strokeColor=#9d97d8;strokeWidth=1.25;arcSize=16;fontSize=21;fontStyle=1;fontFamily=Helvetica;fontColor=#2f2b68;align=center;verticalAlign=middle;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="86" y="160" width="338" height="108" as="geometry"/>
+        </mxCell>
+        <mxCell id="box-init" value="&lt;b&gt;Step 1&lt;/b&gt;&lt;br/&gt;Init package context&lt;br/&gt;&lt;font style=&quot;font-size:16px;font-weight:400;&quot;&gt;credentials + sources&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#def1ed;strokeColor=#7fb8ab;strokeWidth=1.25;arcSize=16;fontSize=21;fontStyle=1;fontFamily=Helvetica;fontColor=#184e48;align=center;verticalAlign=middle;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="86" y="420" width="338" height="112" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="box-syntax" value="&lt;b&gt;Step 2&lt;/b&gt;&lt;br/&gt;Syntax validation&lt;br/&gt;&lt;font style=&quot;font-size:16px;font-weight:400;&quot;&gt;collect_python_sources() + AST parse&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#def1ed;strokeColor=#7fb8ab;strokeWidth=1.25;arcSize=16;fontSize=21;fontStyle=1;fontFamily=Helvetica;fontColor=#184e48;align=center;verticalAlign=middle;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="620" y="142" width="360" height="108" as="geometry"/>
+        </mxCell>
+        <mxCell id="box-airflow" value="&lt;b&gt;Step 3&lt;/b&gt;&lt;br/&gt;Airflow CLI validation&lt;br/&gt;&lt;font style=&quot;font-size:16px;font-weight:400;&quot;&gt;run_airflow_dag_validation()&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f6eddc;strokeColor=#caa86f;strokeWidth=1.25;arcSize=16;fontSize=21;fontStyle=1;fontFamily=Helvetica;fontColor=#694b19;align=center;verticalAlign=middle;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="620" y="342" width="360" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="box-rules" value="&lt;b&gt;Step 4&lt;/b&gt;&lt;br/&gt;DAG rule validation&lt;br/&gt;&lt;font style=&quot;font-size:16px;font-weight:400;&quot;&gt;name / queue / top-level vars&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8e8e2;strokeColor=#d7a298;strokeWidth=1.25;arcSize=16;fontSize=21;fontStyle=1;fontFamily=Helvetica;fontColor=#6a3d35;align=center;verticalAlign=middle;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="620" y="562" width="360" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="box-go" value="&lt;b&gt;Any issue&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:15px;font-weight:400;&quot;&gt;show findings and wait for &amp;quot;go&amp;quot;&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eceafd;strokeColor=#bbb5e8;strokeWidth=1.2;arcSize=16;fontSize=18;fontStyle=1;fontFamily=Helvetica;fontColor=#4a4678;align=center;verticalAlign=middle;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="608" y="742" width="384" height="72" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="box-archive" value="&lt;b&gt;Step 5&lt;/b&gt;&lt;br/&gt;Create archive&lt;br/&gt;&lt;font style=&quot;font-size:16px;font-weight:400;&quot;&gt;create_archive() + SHA256&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f4e5ea;strokeColor=#c79cab;strokeWidth=1.25;arcSize=16;fontSize=21;fontStyle=1;fontFamily=Helvetica;fontColor=#6a3642;align=center;verticalAlign=middle;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="1200" y="142" width="340" height="108" as="geometry"/>
+        </mxCell>
+        <mxCell id="box-target" value="&lt;b&gt;Step 6&lt;/b&gt;&lt;br/&gt;Prepare Nexus target&lt;br/&gt;&lt;font style=&quot;font-size:16px;font-weight:400;&quot;&gt;build_upload_url()&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eeede6;strokeColor=#b6b09f;strokeWidth=1.25;arcSize=16;fontSize=21;fontStyle=1;fontFamily=Helvetica;fontColor=#535048;align=center;verticalAlign=middle;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="1200" y="332" width="340" height="108" as="geometry"/>
+        </mxCell>
+        <mxCell id="box-upload" value="&lt;b&gt;Step 7&lt;/b&gt;&lt;br/&gt;Dry run / upload&lt;br/&gt;&lt;font style=&quot;font-size:16px;font-weight:400;&quot;&gt;skip or PUT archive&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fae8d9;strokeColor=#d9a87d;strokeWidth=1.25;arcSize=16;fontSize=21;fontStyle=1;fontFamily=Helvetica;fontColor=#6a4822;align=center;verticalAlign=middle;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="1200" y="522" width="340" height="108" as="geometry"/>
+        </mxCell>
+        <mxCell id="box-summary" value="&lt;b&gt;Step 8&lt;/b&gt;&lt;br/&gt;Summary + log files" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e2f0e9;strokeColor=#98b6a8;strokeWidth=1.25;arcSize=16;fontSize=21;fontStyle=1;fontFamily=Helvetica;fontColor=#264b3b;align=center;verticalAlign=middle;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="1200" y="712" width="340" height="90" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="edge-main-init" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=blockThin;endFill=1;endSize=9;strokeColor=#8f959d;strokeWidth=1.6;" edge="1" parent="1" source="box-main" target="box-init">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge-init-syntax" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=blockThin;endFill=1;endSize=9;strokeColor=#8f959d;strokeWidth=1.6;" edge="1" parent="1" source="box-init" target="box-syntax">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="500" y="476"/>
+              <mxPoint x="500" y="196"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="edge-syntax-airflow" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=blockThin;endFill=1;endSize=9;strokeColor=#8f959d;strokeWidth=1.6;" edge="1" parent="1" source="box-syntax" target="box-airflow">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge-airflow-rules" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=blockThin;endFill=1;endSize=9;strokeColor=#8f959d;strokeWidth=1.6;" edge="1" parent="1" source="box-airflow" target="box-rules">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge-rules-archive" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=blockThin;endFill=1;endSize=9;strokeColor=#8f959d;strokeWidth=1.6;" edge="1" parent="1" source="box-rules" target="box-archive">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1075" y="617"/>
+              <mxPoint x="1075" y="196"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="edge-archive-target" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=blockThin;endFill=1;endSize=9;strokeColor=#8f959d;strokeWidth=1.6;" edge="1" parent="1" source="box-archive" target="box-target">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge-target-upload" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=blockThin;endFill=1;endSize=9;strokeColor=#8f959d;strokeWidth=1.6;" edge="1" parent="1" source="box-target" target="box-upload">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge-upload-summary" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=blockThin;endFill=1;endSize=9;strokeColor=#8f959d;strokeWidth=1.6;" edge="1" parent="1" source="box-upload" target="box-summary">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
