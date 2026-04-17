@@ -738,8 +738,8 @@ def confirm_continue_after_validation_issue(heading, message, input_fn=None, deb
         )
 
 
-def report_log_file_locations(session):
-    reporter = StepReporter(enabled=True)
+def report_log_file_locations(session, reporter=None):
+    reporter = reporter or StepReporter(enabled=True)
     reporter.section("🗂️", "Execution Logs")
     reporter.value("📄", "STDOUT log", session.stdout_log_path)
     reporter.value("🚨", "STDERR log", session.stderr_log_path)
@@ -990,10 +990,10 @@ def main(argv=None):
         retention_days=logging_settings.retention_days,
     )
     exit_code = 0
+    reporter = StepReporter(enabled=True)
 
     try:
         with session:
-            reporter = StepReporter(enabled=True)
             result = _run_with_args(args, reporter=reporter)
 
             reporter.section("📋", "Package Upload Summary")
@@ -1012,7 +1012,7 @@ def main(argv=None):
         exit_code = 1
     finally:
         if session.stdout_log_path and session.stderr_log_path:
-            report_log_file_locations(session)
+            report_log_file_locations(session, reporter=reporter)
 
     return exit_code
 
