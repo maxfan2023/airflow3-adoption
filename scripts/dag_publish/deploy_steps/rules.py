@@ -37,7 +37,7 @@ class RuleChecker:
                     queue_name = self._extract_literal_string(queue_value, python_file, "queue")
                     all_queues.append((python_file, queue_name))
 
-            if self.dag_variable_rules and visitor.dag_calls:
+            if self.dag_variable_rules and visitor.has_dag_definitions:
                 dag_variable_errors.extend(
                     self._validate_dag_variables(
                         python_file=python_file,
@@ -136,8 +136,13 @@ class RuleChecker:
 class _DagRuleVisitor(ast.NodeVisitor):
     def __init__(self):
         self.dag_calls = []
+        self.dag_decorators = []
         self.queue_values = []
         self.module_assignments = {}
+
+    @property
+    def has_dag_definitions(self):
+        return bool(self.dag_calls or self.dag_decorators)
 
     def visit_Module(self, node):
         for statement in node.body:
@@ -152,6 +157,38 @@ class _DagRuleVisitor(ast.NodeVisitor):
                 self.queue_values.append(keyword.value)
         self.generic_visit(node)
 
+    def visit_FunctionDef(self, node):
+        for decorator in node.decorator_list:
+            if _is_dag_decorator(decorator):
+                self.dag_decorators.append(decorator)
+        self.generic_visit(node)
+
+    def visit_AsyncFunctionDef(self, node):
+        for decorator in node.decorator_list:
+            if _is_dag_decorator(decorator):
+                self.dag_decorators.append(decorator)
+        self.generic_visit(node)
+
+
+def discover_airflow_dag_files(package_root=None, python_files=None):
+    """Return Python files that define Airflow DAGs via DAG(...) or @dag."""
+    if python_files is None:
+        if package_root is None:
+            raise ValueError("package_root or python_files is required.")
+        python_files = discover_python_files(package_root)
+
+    detected = []
+    for python_file in sorted(Path(item).expanduser().resolve() for item in python_files):
+        try:
+            tree = ast.parse(python_file.read_text(encoding="utf-8"), filename=str(python_file))
+        except SyntaxError:
+            continue
+        visitor = _DagRuleVisitor()
+        visitor.visit(tree)
+        if visitor.has_dag_definitions:
+            detected.append(python_file)
+    return detected
+
 
 def _is_dag_call(node):
     if not isinstance(node, ast.Call):
@@ -160,6 +197,16 @@ def _is_dag_call(node):
         return node.func.id == "DAG"
     if isinstance(node.func, ast.Attribute):
         return node.func.attr == "DAG"
+    return False
+
+
+def _is_dag_decorator(node):
+    if isinstance(node, ast.Name):
+        return node.id == "dag"
+    if isinstance(node, ast.Attribute):
+        return node.attr == "dag"
+    if isinstance(node, ast.Call):
+        return _is_dag_decorator(node.func)
     return False
 
 

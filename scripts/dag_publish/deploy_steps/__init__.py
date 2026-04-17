@@ -6,8 +6,13 @@ from deploy_steps.checksum import ChecksumValidator
 from deploy_steps.config import load_pipeline_config
 from deploy_steps.exceptions import DeploymentError
 from deploy_steps.publisher import DeploymentPublisher
-from deploy_steps.python_checks import ImportChecker, PythonCheckOrchestrator, SyntaxChecker
-from deploy_steps.rules import RuleChecker
+from deploy_steps.python_checks import (
+    ImportChecker,
+    PythonCheckOrchestrator,
+    SyntaxChecker,
+    discover_python_files,
+)
+from deploy_steps.rules import RuleChecker, discover_airflow_dag_files
 from deploy_steps.tag_processor import TagProcessor
 
 __all__ = [
@@ -21,6 +26,8 @@ __all__ = [
     "RuleChecker",
     "SyntaxChecker",
     "TagProcessor",
+    "discover_airflow_dag_files",
+    "discover_python_files",
     "load_pipeline_config",
     "strip_archive_suffix",
 ]

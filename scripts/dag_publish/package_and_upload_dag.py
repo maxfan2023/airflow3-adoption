@@ -52,7 +52,13 @@ from common import (
     build_default_credentials_candidates,
     normalize_environment,
 )
-from deploy_steps import DeploymentError, RuleChecker, SyntaxChecker, load_pipeline_config
+from deploy_steps import (
+    DeploymentError,
+    RuleChecker,
+    SyntaxChecker,
+    discover_airflow_dag_files,
+    load_pipeline_config,
+)
 
 
 SCRIPT_PATH = Path(__file__).resolve()
@@ -277,13 +283,18 @@ def iter_archive_entries(sources):
     return entries
 
 
-def validate_python_sources(sources):
-    """Validate packaged Python files before building the archive."""
-    python_files = [
+def collect_python_sources(sources):
+    """Return all Python files that will be packaged."""
+    return [
         source_path
         for source_path, _archive_entry in iter_archive_entries(sources)
         if source_path.suffix.lower() == ".py"
     ]
+
+
+def validate_python_sources(sources):
+    """Validate packaged Python files before building the archive."""
+    python_files = collect_python_sources(sources)
     return SyntaxChecker().check_files(python_files)
 
 
@@ -321,6 +332,31 @@ def stage_sources_for_airflow_check(sources, staging_root, excluded_python_files
     return Path(staging_root)
 
 
+def collect_staged_python_files(staging_root):
+    return sorted(Path(staging_root).rglob("*.py"))
+
+
+def build_rule_check_descriptions(rules):
+    descriptions = []
+    if rules.name_rules.enabled:
+        descriptions.append("Validate literal dag_id values against configured allow/deny patterns.")
+    if rules.queue_rules.enabled:
+        descriptions.append("Validate literal task queue values against configured allow/deny patterns.")
+    for rule in rules.dag_variable_rules:
+        if rule.allowed_values:
+            descriptions.append(
+                "Require top-level variable '{0}' on Airflow DAG files with allowed values: {1}.".format(
+                    rule.name,
+                    ", ".join(rule.allowed_values),
+                )
+            )
+        else:
+            descriptions.append(
+                "Require top-level variable '{0}' on Airflow DAG files.".format(rule.name)
+            )
+    return descriptions
+
+
 def render_airflow_cli_env(raw_env, session_root):
     """Render per-run Airflow CLI environment overrides."""
     session_root_text = Path(session_root).expanduser().resolve().as_posix()
@@ -350,6 +386,7 @@ def run_airflow_dag_validation(
     excluded_python_files=None,
     debug=False,
     input_fn=None,
+    reporter=None,
 ):
     """Run advisory Airflow DAG validation against the staged package contents."""
     warning_message = ""
@@ -383,6 +420,15 @@ def run_airflow_dag_validation(
                 excluded_python_files=excluded_python_files,
                 debug=debug,
             )
+            staged_python_files = collect_staged_python_files(staging_root)
+            detected_dag_files = discover_airflow_dag_files(python_files=staged_python_files)
+            if reporter:
+                reporter.message(
+                    "🧪",
+                    "Checks: initialize a temporary Airflow metadata DB, then run DAG import validation.",
+                )
+                reporter.items("📄", "Python files staged for Airflow CLI validation", staged_python_files)
+                reporter.items("🌬️", "Airflow DAG files detected", detected_dag_files)
             command = build_airflow_validation_command(config)
             debug_print(debug, "Airflow CLI temp root: {0}".format(config.airflow_cli.temp_root))
             debug_print(debug, "Airflow CLI session root: {0}".format(session_root))
@@ -424,6 +470,7 @@ def run_dag_rule_validation(
     excluded_python_files=None,
     debug=False,
     input_fn=None,
+    reporter=None,
 ):
     """Run configurable DAG rule validation on staged syntax-valid files."""
     warning_message = ""
@@ -450,6 +497,16 @@ def run_dag_rule_validation(
                 excluded_python_files=excluded_python_files,
                 debug=debug,
             )
+            staged_python_files = collect_staged_python_files(staged_root)
+            detected_dag_files = discover_airflow_dag_files(python_files=staged_python_files)
+            if reporter:
+                reporter.message(
+                    "🧪",
+                    "Checks: apply configured DAG name, queue, and top-level variable rules.",
+                )
+                reporter.items("📄", "Python files staged for DAG rule validation", staged_python_files)
+                reporter.items("🌬️", "Airflow DAG files detected", detected_dag_files)
+                reporter.items("📚", "Configured DAG rule checks", build_rule_check_descriptions(config.rules))
             debug_print(debug, "DAG rule validation staging root: {0}".format(staged_root))
             try:
                 RuleChecker(
@@ -681,6 +738,13 @@ def confirm_continue_after_validation_issue(heading, message, input_fn=None, deb
         )
 
 
+def report_log_file_locations(session):
+    reporter = StepReporter(enabled=True)
+    reporter.section("🗂️", "Execution Logs")
+    reporter.value("📄", "STDOUT log", session.stdout_log_path)
+    reporter.value("🚨", "STDERR log", session.stderr_log_path)
+
+
 def build_archive_name(artifact_id, version):
     """Build the final zip filename.
 
@@ -815,9 +879,13 @@ def _run_with_args(args, reporter=None):
 
     reporter.section("🔍", "Run Python Syntax Validation")
     debug_print(args.debug, "Running Python syntax validation for package sources.")
+    python_files = collect_python_sources(sources)
+    reporter.message("🧪", "Checks: parse each packaged .py file with Python AST syntax validation.")
+    reporter.items("📄", "Python files detected", python_files)
     syntax_report = validate_python_sources(sources)
     syntax_issues_overridden = False
     if syntax_report.has_errors:
+        reporter.items("🚨", "Python files with syntax issues", syntax_report.invalid_files, stream=sys.stderr)
         confirm_continue_after_validation_issue(
             heading="Python syntax validation reported issues.",
             message=syntax_report.render_error_message(),
@@ -827,6 +895,7 @@ def _run_with_args(args, reporter=None):
         reporter.message("⚠️", "Python syntax validation issues were overridden by operator input.")
     else:
         reporter.message("✅", "Python syntax validation passed.")
+    reporter.items("✅", "Syntax-valid Python files", syntax_report.valid_files)
 
     reporter.section("🐍", "Run Airflow CLI Validation")
     if syntax_report.valid_files:
@@ -839,6 +908,7 @@ def _run_with_args(args, reporter=None):
             config_path=args.config,
             excluded_python_files=syntax_report.invalid_files,
             debug=args.debug,
+            reporter=reporter,
         )
         reporter.message("✅", "Airflow CLI validation finished.")
 
@@ -850,6 +920,7 @@ def _run_with_args(args, reporter=None):
             config_path=args.config,
             excluded_python_files=syntax_report.invalid_files,
             debug=args.debug,
+            reporter=reporter,
         )
         reporter.message("✅", "DAG rule validation finished.")
     else:
@@ -913,12 +984,15 @@ def main(argv=None):
         environment=args.environment,
     )
 
+    session = ScriptOutputSession(
+        script_name="package_and_upload_dag",
+        log_directory=logging_settings.directory,
+        retention_days=logging_settings.retention_days,
+    )
+    exit_code = 0
+
     try:
-        with ScriptOutputSession(
-            script_name="package_and_upload_dag",
-            log_directory=logging_settings.directory,
-            retention_days=logging_settings.retention_days,
-        ):
+        with session:
             reporter = StepReporter(enabled=True)
             result = _run_with_args(args, reporter=reporter)
 
@@ -933,10 +1007,14 @@ def main(argv=None):
                 reporter.message("🧪", "Dry run enabled. Upload skipped.")
             else:
                 reporter.message("✅", "Upload completed successfully.")
-            return 0
     except (DeploymentError, RuntimeError, ValueError, OSError) as exc:
         print(f"❌ Error: {exc}", file=sys.stderr)
-        return 1
+        exit_code = 1
+    finally:
+        if session.stdout_log_path and session.stderr_log_path:
+            report_log_file_locations(session)
+
+    return exit_code
 
 
 if __name__ == "__main__":

@@ -17,6 +17,8 @@ This repository is intentionally minimal for the initial setup. We will add envi
 - 打包前会先做 Python 语法检查，并按对应环境的 `deploy_pipeline.<environment>.json` 执行一次 Airflow CLI 校验
 - 终端输出会按步骤分段显示，并带 emoji 标识当前阶段
 - 每次调用都会同时写一份标准输出日志和一份错误日志
+- 每次检查都会列出本轮检测到的 Python 文件或 Airflow DAG 文件
+- 运行结束时会在终端明确打印 stdout/stderr 日志文件路径
 
 ### 凭据文件格式
 
@@ -56,9 +58,11 @@ NEXUS_INSECURE=false
 - 脚本只使用 Python 标准库，不需要额外安装第三方依赖包
 - 脚本已经避免使用 Python 3.9 专属语法，适合 RHEL8 常见的 `python3` 环境
 - 如果 `deploy_pipeline.<environment>.json` 里配置了 `imports.activation_command`，脚本会先激活 Miniconda/Conda 环境，再执行 `airflow db migrate` 和 `airflow dags list-import-errors -l -o json`
+- Python 语法检查只负责检查 `.py` 文件是不是合法 Python 语法；它不会检查 `GDT_ET_FEED_SOURCE` 这类 DAG 业务规则
 - Python 语法检查会收集所有 `.py` 文件中的语法错误一起展示；如果你输入 `go`，脚本会忽略这些语法问题继续打包，并且只对语法正确的 Python 文件继续做 Airflow CLI 校验
 - Airflow CLI 校验发现 import error / 校验环境异常时，脚本会先把错误打印到终端；只有在提示后输入 `go`，才会忽略这些问题继续打包
 - Airflow CLI 校验通过后，脚本还会按 `deploy_pipeline.<environment>.json` 里的 `rules` 做 DAG 规则检查；默认会检查 Airflow DAG 文件里是否定义了 `GDT_ET_FEED_SOURCE`，以及它的值是否属于配置允许列表
+- 如果使用 `--debug`，脚本还会逐步输出执行命令和 staging 细节，方便在公司服务器上定位问题
 - 日志目录和保留天数由 `deploy_pipeline.<environment>.json` 里的 `logging.directory` 与 `logging.retention_days` 控制；脚本启动时会自动清理超过保留天数的旧日志
 - Airflow CLI 校验使用的临时目录和环境变量由 `deploy_pipeline.<environment>.json` 里的 `airflow_cli.temp_root` 与 `airflow_cli.env` 控制，不再固定写死到系统 `/tmp`
 
@@ -105,6 +109,11 @@ python3 scripts/dag_publish/package_and_upload_dag.py \
   --dry-run \
   --debug
 ```
+
+运行结束后，终端会额外打印：
+
+- stdout 日志文件位置
+- stderr 日志文件位置
 
 如果要生成你提供的那种公司命名风格，可以这样调用：
 
@@ -206,6 +215,7 @@ python3 scripts/dag_publish/deploy_dag_from_nexus.py \
 - `imports`: `extra_pythonpath`、`shell_executable`、`activation_command`、`python_executable`、`timeout_seconds`
 - `tagging`: `source` 变量名、US source 列表、受管 tags
 - `rules`: DAG 命名规则、queue 规则，以及 DAG 顶层变量规则
+- 部署脚本也支持 `--debug`，会额外打印校验阶段执行的命令
 
 例如：
 
