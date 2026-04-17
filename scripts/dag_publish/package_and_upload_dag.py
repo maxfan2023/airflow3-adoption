@@ -34,8 +34,14 @@ The script reads Nexus credentials from the first existing predefined location:
 import argparse
 import base64
 import hashlib
+import json
+import os
+import shlex
+import shutil
 import ssl
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Dict, List, Set, Tuple
 from urllib import error, parse, request
@@ -45,6 +51,7 @@ from common import (
     build_default_credentials_candidates,
     normalize_environment,
 )
+from deploy_steps import DeploymentError, SyntaxChecker, load_pipeline_config
 
 
 SCRIPT_PATH = Path(__file__).resolve()
@@ -61,7 +68,7 @@ SKIP_SUFFIXES = {".pyc", ".pyo"}
 SURROUNDING_QUOTE_CHARS = {'"', "'", "“", "”", "‘", "’"}
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv=None) -> argparse.Namespace:
     """Define the command line interface developers use to publish a DAG package."""
     parser = argparse.ArgumentParser(
         description="Package DAG files into a zip archive and upload it to Nexus.",
@@ -89,6 +96,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--credentials-file",
         help="Override the default environment-specific Nexus credentials file.",
+    )
+    parser.add_argument(
+        "--config",
+        help="Override the deployment pipeline config used for Airflow DAG validation.",
     )
     parser.add_argument(
         "--path-prefix",
@@ -130,7 +141,12 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Create the archive and print the upload target without sending it to Nexus.",
     )
-    return parser.parse_args()
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Print step-by-step debug details, including executed shell commands.",
+    )
+    return parser.parse_args(argv)
 
 
 def load_properties(path):
@@ -260,6 +276,303 @@ def iter_archive_entries(sources):
     return entries
 
 
+def validate_python_sources(sources):
+    """Validate packaged Python files before building the archive."""
+    python_files = [
+        source_path
+        for source_path, _archive_entry in iter_archive_entries(sources)
+        if source_path.suffix.lower() == ".py"
+    ]
+    if not python_files:
+        return
+    SyntaxChecker().run(REPO_ROOT, python_files)
+
+
+def debug_print(enabled, message):
+    """Print a debug line when --debug is enabled."""
+    if enabled:
+        print("[DEBUG] {0}".format(message))
+
+
+def format_command(command):
+    """Format a command for debug output."""
+    if isinstance(command, str):
+        return command
+    return " ".join(shlex.quote(str(part)) for part in command)
+
+
+def stage_sources_for_airflow_check(sources, staging_root, debug=False):
+    """Copy packaged sources into a temporary directory for Airflow DAG validation."""
+    staged_files = 0
+    for source_path, archive_entry in iter_archive_entries(sources):
+        destination = Path(staging_root) / archive_entry
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(str(source_path), str(destination))
+        staged_files += 1
+        debug_print(debug, "Staged file for Airflow validation: {0} -> {1}".format(source_path, destination))
+    debug_print(debug, "Prepared Airflow validation staging directory with {0} files.".format(staged_files))
+    return Path(staging_root)
+
+
+def run_airflow_dag_validation(sources, environment, config_path=None, debug=False, input_fn=None):
+    """Run advisory Airflow DAG validation against the staged package contents."""
+    warning_message = ""
+    debug_print(debug, "Loading deployment config for Airflow validation.")
+    try:
+        config = load_pipeline_config(explicit_path=config_path, environment=environment)
+    except DeploymentError as exc:
+        warning_message = (
+            "Airflow DAG validation could not start because the deployment config "
+            "could not be loaded.\n{0}".format(exc)
+        )
+    else:
+        debug_print(debug, "Using deployment config: {0}".format(config.config_path))
+        with tempfile.TemporaryDirectory(prefix="dag_package_airflow_check_") as temp_dir:
+            staging_root = stage_sources_for_airflow_check(
+                sources,
+                Path(temp_dir) / "staging",
+                debug=debug,
+            )
+            command = build_airflow_validation_command(config)
+            environment_overrides = {
+                "AIRFLOW__CORE__DAGS_FOLDER": str(staging_root),
+                "AIRFLOW__CORE__LOAD_EXAMPLES": "False",
+                "AIRFLOW__DATABASE__SQL_ALCHEMY_CONN": "sqlite:///{0}".format(
+                    (Path(temp_dir) / "airflow_metadata.db").as_posix()
+                ),
+                "PYTHONDONTWRITEBYTECODE": "1",
+            }
+            debug_print(debug, "Airflow validation command: {0}".format(format_command(command)))
+            debug_print(debug, "Airflow validation environment overrides: {0}".format(environment_overrides))
+
+            try:
+                completed = execute_airflow_validation(
+                    python_executable=config.imports.python_executable,
+                    validation_command=command,
+                    shell_executable=config.imports.shell_executable,
+                    activation_command=config.imports.activation_command,
+                    timeout_seconds=config.imports.timeout_seconds,
+                    environment_overrides=environment_overrides,
+                    debug=debug,
+                )
+            except DeploymentError as exc:
+                warning_message = (
+                    "Airflow DAG validation could not be completed.\n{0}".format(exc)
+                )
+            else:
+                warning_message = interpret_airflow_validation_result(completed)
+
+    if warning_message:
+        print("Warning: Airflow DAG validation reported issues.", file=sys.stderr)
+        print(warning_message, file=sys.stderr)
+        response = prompt_user_to_continue(input_fn=input_fn)
+        debug_print(debug, "User confirmation response after Airflow validation warning: {0}".format(response))
+        if response not in {"y", "yes"}:
+            raise DeploymentError(
+                "Packaging aborted by user after Airflow DAG validation warning."
+            )
+    else:
+        debug_print(debug, "Airflow DAG validation completed without import errors.")
+
+
+def build_airflow_validation_command(config):
+    """Build the Airflow CLI command used for package-time DAG validation."""
+    return [
+        config.imports.python_executable,
+        "-m",
+        "airflow",
+        "dags",
+        "list-import-errors",
+        "-l",
+        "-o",
+        "json",
+    ]
+
+
+def build_airflow_db_migrate_command(python_executable):
+    """Build the Airflow CLI command used to initialize the temporary metadata DB."""
+    return [
+        python_executable,
+        "-m",
+        "airflow",
+        "db",
+        "migrate",
+    ]
+
+
+def execute_airflow_validation(
+    python_executable,
+    validation_command,
+    shell_executable,
+    activation_command,
+    timeout_seconds,
+    environment_overrides,
+    debug=False,
+):
+    """Execute Airflow DB init plus DAG validation inside the configured Python environment."""
+    migrate_command = build_airflow_db_migrate_command(python_executable)
+    debug_print(debug, "Airflow DB migrate command: {0}".format(format_command(migrate_command)))
+    migrate_result = execute_airflow_command(
+        command=migrate_command,
+        shell_executable=shell_executable,
+        activation_command=activation_command,
+        timeout_seconds=timeout_seconds,
+        environment_overrides=environment_overrides,
+        debug=debug,
+    )
+    if migrate_result.returncode != 0:
+        raise DeploymentError(build_airflow_command_failure_message(migrate_result, "Airflow DB migrate command"))
+
+    return execute_airflow_command(
+        command=validation_command,
+        shell_executable=shell_executable,
+        activation_command=activation_command,
+        timeout_seconds=timeout_seconds,
+        environment_overrides=environment_overrides,
+        debug=debug,
+    )
+
+
+def execute_airflow_command(
+    command,
+    shell_executable,
+    activation_command,
+    timeout_seconds,
+    environment_overrides,
+    debug=False,
+):
+    """Execute one Airflow-related command inside the configured Python environment."""
+    env = os.environ.copy()
+    env.update(environment_overrides)
+
+    try:
+        if activation_command:
+            shell_command = "{0} && {1}".format(
+                activation_command,
+                format_command(command),
+            )
+            debug_print(debug, "Executing shell command: {0}".format(shell_command))
+            return subprocess.run(
+                [shell_executable, "-lc", shell_command],
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=timeout_seconds,
+                check=False,
+            )
+        debug_print(debug, "Executing command: {0}".format(format_command(command)))
+        return subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=timeout_seconds,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise DeploymentError(
+            "Airflow DAG validation timed out after {0} seconds.".format(timeout_seconds)
+        ) from exc
+    except OSError as exc:
+        raise DeploymentError(
+            "Airflow DAG validation could not start the configured Python environment: {0}".format(
+                exc
+            )
+        ) from exc
+
+
+def interpret_airflow_validation_result(completed):
+    """Interpret the Airflow CLI result and return a warning message when issues are found."""
+    stdout = (completed.stdout or "").strip()
+    stderr = (completed.stderr or "").strip()
+
+    if not stdout:
+        if completed.returncode != 0:
+            return build_airflow_command_failure_message(
+                completed,
+                "Airflow DAG validation command",
+            )
+        return ""
+
+    try:
+        parsed = json.loads(stdout)
+    except json.JSONDecodeError:
+        if completed.returncode != 0:
+            return build_airflow_command_failure_message(completed, "Airflow DAG validation command")
+        message = "Airflow DAG validation returned non-JSON output."
+        if stdout:
+            message = "{0}\nSTDOUT:\n{1}".format(message, stdout)
+        if stderr:
+            message = "{0}\nSTDERR:\n{1}".format(message, stderr)
+        return message
+
+    if isinstance(parsed, dict):
+        parsed = parsed.get("import_errors") or parsed.get("errors") or [parsed]
+
+    if not parsed:
+        if completed.returncode != 0:
+            return build_airflow_command_failure_message(
+                completed,
+                "Airflow DAG validation command",
+            )
+        return ""
+
+    lines = ["Airflow reported DAG import errors:"]
+    for index, item in enumerate(parsed, start=1):
+        if isinstance(item, dict):
+            filepath = (
+                item.get("filepath")
+                or item.get("file_path")
+                or item.get("filename")
+                or "<unknown file>"
+            )
+            error_detail = (
+                item.get("error")
+                or item.get("import_error")
+                or item.get("stacktrace")
+                or json.dumps(item, ensure_ascii=False)
+            )
+            lines.append("{0}. {1}".format(index, filepath))
+            lines.append("   {0}".format(str(error_detail).replace("\n", "\n   ")))
+        else:
+            lines.append("{0}. {1}".format(index, item))
+    if stderr:
+        lines.append("STDERR:")
+        lines.append(stderr)
+    return "\n".join(lines)
+
+
+def build_airflow_command_failure_message(completed, label):
+    """Build a readable warning when an Airflow CLI command itself fails."""
+    lines = [
+        "{0} failed with exit code {1}.".format(
+            label,
+            completed.returncode
+        )
+    ]
+    stdout = (completed.stdout or "").strip()
+    stderr = (completed.stderr or "").strip()
+    if stdout:
+        lines.append("STDOUT:")
+        lines.append(stdout)
+    if stderr:
+        lines.append("STDERR:")
+        lines.append(stderr)
+    return "\n".join(lines)
+
+
+def prompt_user_to_continue(input_fn=None):
+    """Prompt the user to continue after an advisory Airflow validation warning."""
+    if input_fn is None:
+        input_fn = input
+    try:
+        return input_fn("Continue packaging and upload? [y/N]: ").strip().lower()
+    except EOFError as exc:
+        raise DeploymentError(
+            "Airflow DAG validation reported issues and interactive confirmation was not available."
+        ) from exc
+
+
 def build_archive_name(artifact_id, version):
     """Build the final zip filename.
 
@@ -373,18 +686,31 @@ def upload_archive(
         raise RuntimeError(f"Unable to reach Nexus: {exc.reason}") from exc
 
 
-def main():
+def main(argv=None):
     """Main flow: read config, package sources, print target, then upload."""
-    args = parse_args()
+    args = parse_args(argv)
 
     try:
+        debug_print(args.debug, "Starting package_and_upload_dag.")
         environment = normalize_environment(args.environment)
+        debug_print(args.debug, "Selected environment: {0}".format(environment))
         credentials_file = resolve_credentials_file(
             explicit_path=args.credentials_file,
             environment=environment,
         )
+        debug_print(args.debug, "Resolved credentials file: {0}".format(credentials_file))
         properties = load_properties(credentials_file)
         sources = normalize_sources(args.sources)
+        debug_print(args.debug, "Normalized {0} source path(s).".format(len(sources)))
+        debug_print(args.debug, "Running Python syntax validation for package sources.")
+        validate_python_sources(sources)
+        debug_print(args.debug, "Running advisory Airflow DAG validation.")
+        run_airflow_dag_validation(
+            sources=sources,
+            environment=environment,
+            config_path=args.config,
+            debug=args.debug,
+        )
         artifact_id = derive_artifact_id(sources, args.artifact_id)
         version = args.version.strip()
         if not version:
@@ -408,12 +734,14 @@ def main():
         # The archive name is the release artifact developers will see in Nexus.
         archive_name = build_archive_name(artifact_id, version)
         output_dir = Path(args.output_dir).expanduser().resolve()
+        debug_print(args.debug, "Creating archive {0} in {1}".format(archive_name, output_dir))
         archive_path, archive_sha256 = create_archive(sources, output_dir, archive_name)
 
         # When no custom upload path is given, publish to a predictable path so
         # downstream deployment pipelines can fetch by artifact coordinates.
         upload_path = args.upload_path or build_default_upload_path(path_prefix, archive_name)
         upload_url = build_upload_url(repository_url, upload_path)
+        debug_print(args.debug, "Resolved upload URL: {0}".format(upload_url))
 
         print(f"Archive created: {archive_path}")
         print(f"Environment: {environment}")
@@ -422,13 +750,15 @@ def main():
         print(f"Upload target: {upload_url}")
 
         if args.dry_run:
+            debug_print(args.debug, "Dry-run enabled; upload step skipped.")
             print("Dry run enabled. Upload skipped.")
             return 0
 
+        debug_print(args.debug, "Uploading archive to Nexus.")
         upload_archive(upload_url, archive_path, username, password, timeout, insecure)
         print("Upload completed successfully.")
         return 0
-    except (RuntimeError, ValueError) as exc:
+    except (DeploymentError, RuntimeError, ValueError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
