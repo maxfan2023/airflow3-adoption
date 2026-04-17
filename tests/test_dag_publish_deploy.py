@@ -21,7 +21,7 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 import package_and_upload_dag
-from cli_support import RuntimeLoggingSettings, cleanup_log_directory
+from cli_support import RuntimeLoggingSettings, StepReporter, cleanup_log_directory
 from deploy_dag_from_nexus import main, run
 from package_and_upload_dag import main as package_and_upload_main
 from deploy_steps.archive import ArchiveExtractor
@@ -35,6 +35,15 @@ from deploy_steps.tag_processor import TagProcessor
 
 
 class ConfigAndArchiveTests(unittest.TestCase):
+    def test_step_reporter_numbers_sections(self):
+        stdout = io.StringIO()
+        reporter = StepReporter(enabled=True)
+        reporter.section("🧭", "Initialize", stream=stdout)
+        reporter.section("🔍", "Validate", stream=stdout)
+        output = stdout.getvalue()
+        self.assertIn("Step 1. Initialize", output)
+        self.assertIn("Step 2. Validate", output)
+
     def test_load_pipeline_config_resolves_relative_paths_and_override(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)

@@ -105,14 +105,17 @@ class StepReporter:
 
     def __init__(self, enabled=True):
         self.enabled = bool(enabled)
+        self._section_count = 0
 
     def section(self, emoji, title, detail=None, stream=None):
         if not self.enabled:
             return
         stream = stream or sys.stdout
         border = "=" * 18
+        self._section_count += 1
+        numbered_title = "Step {0}. {1}".format(self._section_count, title)
         print("", file=stream)
-        print("{0} {1} {2} {0}".format(border, emoji, title), file=stream)
+        print("{0} {1} {2} {0}".format(border, emoji, numbered_title), file=stream)
         if detail:
             print(detail, file=stream)
 

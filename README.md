@@ -16,6 +16,7 @@ This repository is intentionally minimal for the initial setup. We will add envi
 - 程序支持 `--environment dev|uat|prod`，会优先查找对应环境的凭据文件
 - 打包前会先做 Python 语法检查，并按对应环境的 `deploy_pipeline.<environment>.json` 执行一次 Airflow CLI 校验
 - 终端输出会按步骤分段显示，并带 emoji 标识当前阶段
+- 每个步骤标题会自动带 `Step N.` 编号，方便跟踪当前执行进度
 - 每次调用都会同时写一份标准输出日志和一份错误日志
 - 每次检查都会列出本轮检测到的 Python 文件或 Airflow DAG 文件
 - 运行结束时会在终端明确打印 stdout/stderr 日志文件路径
