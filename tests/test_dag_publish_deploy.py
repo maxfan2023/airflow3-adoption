@@ -1,11 +1,15 @@
+import io
 import json
 import shutil
+import subprocess
 import sys
 import tarfile
 import tempfile
 import textwrap
+import types
 import unittest
 import zipfile
+from contextlib import redirect_stderr
 from pathlib import Path
 from unittest import mock
 
@@ -15,7 +19,9 @@ SCRIPT_DIR = REPO_ROOT / "scripts" / "dag_publish"
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
+import package_and_upload_dag
 from deploy_dag_from_nexus import main, run
+from package_and_upload_dag import main as package_and_upload_main
 from deploy_steps.archive import ArchiveExtractor
 from deploy_steps.checksum import ChecksumValidator
 from deploy_steps.config import load_pipeline_config
@@ -176,6 +182,156 @@ class ChecksumAndPythonCheckTests(unittest.TestCase):
                 python_executable=sys.executable,
             )
             checker.run(package_root, sorted(package_root.glob("*.py")))
+
+    def test_package_upload_reports_readable_syntax_error(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            bad_dag = temp_path / "bad_dag.py"
+            bad_dag.write_text("def broken(:\n", encoding="utf-8")
+            credentials_file = temp_path / "nexus_credentials.dev.env"
+            credentials_file.write_text(
+                "NEXUS_USERNAME=tester\nNEXUS_PASSWORD=secret\n",
+                encoding="utf-8",
+            )
+
+            stderr = io.StringIO()
+            with redirect_stderr(stderr):
+                exit_code = package_and_upload_main(
+                    [
+                        str(bad_dag),
+                        "--artifact-id",
+                        "bad-dag",
+                        "--version",
+                        "1.0.0",
+                        "--credentials-file",
+                        str(credentials_file),
+                        "--dry-run",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 1)
+            error_output = stderr.getvalue()
+            self.assertIn("Error: Syntax check failed for", error_output)
+            self.assertIn("bad_dag.py", error_output)
+            self.assertNotIn("Traceback", error_output)
+
+    def test_package_upload_warns_on_airflow_check_and_can_continue(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            dag_file = temp_path / "example_dag.py"
+            dag_file.write_text("from airflow import DAG\n", encoding="utf-8")
+            credentials_file = temp_path / "nexus_credentials.dev.env"
+            credentials_file.write_text(
+                "NEXUS_USERNAME=tester\nNEXUS_PASSWORD=secret\n",
+                encoding="utf-8",
+            )
+            fake_config = _package_validation_config()
+            migrate_result = subprocess.CompletedProcess(
+                args=["python", "-m", "airflow", "db", "migrate"],
+                returncode=0,
+                stdout="Database migrated.\n",
+                stderr="",
+            )
+            airflow_result = subprocess.CompletedProcess(
+                args=["python", "-m", "airflow", "dags", "list-import-errors", "-l", "-o", "json"],
+                returncode=1,
+                stdout=json.dumps(
+                    [{"filepath": "/tmp/example_dag.py", "error": "Broken DAG: import failed"}]
+                ),
+                stderr="",
+            )
+
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with mock.patch.object(package_and_upload_dag, "load_pipeline_config", return_value=fake_config):
+                with mock.patch.object(
+                    package_and_upload_dag.subprocess,
+                    "run",
+                    side_effect=[migrate_result, airflow_result],
+                ) as run_mock:
+                    with mock.patch("builtins.input", return_value="y") as input_mock:
+                        with mock.patch("sys.stdout", new=stdout), mock.patch("sys.stderr", new=stderr):
+                            exit_code = package_and_upload_main(
+                                [
+                                    str(dag_file),
+                                    "--artifact-id",
+                                    "demo",
+                                    "--version",
+                                    "1.0.0",
+                                    "--credentials-file",
+                                    str(credentials_file),
+                                    "--dry-run",
+                                ]
+                            )
+
+            self.assertEqual(exit_code, 0)
+            self.assertTrue(input_mock.called)
+            self.assertEqual(run_mock.call_count, 2)
+            self.assertEqual(run_mock.call_args_list[0].args[0], ["python", "-m", "airflow", "db", "migrate"])
+            self.assertEqual(
+                run_mock.call_args_list[1].args[0],
+                ["python", "-m", "airflow", "dags", "list-import-errors", "-l", "-o", "json"],
+            )
+            self.assertIn("Warning: Airflow DAG validation reported issues.", stderr.getvalue())
+            self.assertIn("Broken DAG: import failed", stderr.getvalue())
+            self.assertIn("Archive created:", stdout.getvalue())
+
+    def test_package_upload_debug_prints_airflow_command(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            dag_file = temp_path / "example_dag.py"
+            dag_file.write_text("from airflow import DAG\n", encoding="utf-8")
+            credentials_file = temp_path / "nexus_credentials.dev.env"
+            credentials_file.write_text(
+                "NEXUS_USERNAME=tester\nNEXUS_PASSWORD=secret\n",
+                encoding="utf-8",
+            )
+            fake_config = _package_validation_config(
+                activation_command="source /opt/miniconda/etc/profile.d/conda.sh && conda activate airflow3_dev"
+            )
+            migrate_result = subprocess.CompletedProcess(
+                args=["/bin/bash", "-lc", "python -m airflow db migrate"],
+                returncode=0,
+                stdout="Database migrated.\n",
+                stderr="",
+            )
+            airflow_result = subprocess.CompletedProcess(
+                args=["python", "-m", "airflow"],
+                returncode=0,
+                stdout="[]",
+                stderr="",
+            )
+
+            stdout = io.StringIO()
+            with mock.patch.object(package_and_upload_dag, "load_pipeline_config", return_value=fake_config):
+                with mock.patch.object(
+                    package_and_upload_dag.subprocess,
+                    "run",
+                    side_effect=[migrate_result, airflow_result],
+                ):
+                    with mock.patch("sys.stdout", new=stdout):
+                        exit_code = package_and_upload_main(
+                            [
+                                str(dag_file),
+                                "--artifact-id",
+                                "demo",
+                                "--version",
+                                "1.0.0",
+                                "--credentials-file",
+                                str(credentials_file),
+                                "--dry-run",
+                                "--debug",
+                            ]
+                        )
+
+            self.assertEqual(exit_code, 0)
+            debug_output = stdout.getvalue()
+            self.assertIn("[DEBUG] Starting package_and_upload_dag.", debug_output)
+            self.assertIn("Airflow DB migrate command:", debug_output)
+            self.assertIn("python -m airflow db migrate", debug_output)
+            self.assertIn("Airflow validation command:", debug_output)
+            self.assertIn("python -m airflow dags list-import-errors -l -o json", debug_output)
+            self.assertIn("Executing shell command:", debug_output)
 
 
 class TagAndRuleTests(unittest.TestCase):
@@ -427,7 +583,6 @@ class IntegrationTests(unittest.TestCase):
         )
         return config_path
 
-
 def _rule(enabled, allow_patterns, deny_patterns):
     class SimpleRule:
         pass
@@ -437,6 +592,20 @@ def _rule(enabled, allow_patterns, deny_patterns):
     rule.allow_patterns = allow_patterns
     rule.deny_patterns = deny_patterns
     return rule
+
+
+def _package_validation_config(activation_command=""):
+    imports = types.SimpleNamespace(
+        extra_pythonpath=[],
+        shell_executable="/bin/bash",
+        activation_command=activation_command,
+        python_executable="python",
+        timeout_seconds=30,
+    )
+    return types.SimpleNamespace(
+        config_path=Path("/tmp/fake_deploy_pipeline.dev.json"),
+        imports=imports,
+    )
 
 
 if __name__ == "__main__":

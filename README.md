@@ -14,6 +14,7 @@ This repository is intentionally minimal for the initial setup. We will add envi
   `configs/dag_publish/nexus_credentials.uat.env.example`
   `configs/dag_publish/nexus_credentials.prod.env.example`
 - 程序支持 `--environment dev|uat|prod`，会优先查找对应环境的凭据文件
+- 打包前会先做 Python 语法检查，并按对应环境的 `deploy_pipeline.<environment>.json` 执行一次 Airflow CLI 校验
 
 ### 凭据文件格式
 
@@ -52,6 +53,8 @@ NEXUS_INSECURE=false
 - 实际凭据文件已被 `.gitignore` 忽略，不会被提交
 - 脚本只使用 Python 标准库，不需要额外安装第三方依赖包
 - 脚本已经避免使用 Python 3.9 专属语法，适合 RHEL8 常见的 `python3` 环境
+- 如果 `deploy_pipeline.<environment>.json` 里配置了 `imports.activation_command`，脚本会先激活 Miniconda/Conda 环境，再执行 `airflow db migrate` 和 `airflow dags list-import-errors -l -o json`
+- Airflow CLI 校验发现 import error 或校验环境异常时，脚本会把结果打印到终端，并提示是否继续打包上传
 
 ### 使用示例
 
@@ -85,6 +88,18 @@ python3 scripts/dag_publish/package_and_upload_dag.py \
   --dry-run
 ```
 
+查看每个步骤和执行命令的调试输出：
+
+```bash
+python3 scripts/dag_publish/package_and_upload_dag.py \
+  dags/customer_sync \
+  --environment dev \
+  --artifact-id customer-sync \
+  --version 1.0.0 \
+  --dry-run \
+  --debug
+```
+
 如果要生成你提供的那种公司命名风格，可以这样调用：
 
 ```bash
@@ -102,6 +117,18 @@ com/hsbc/gdt/et/fctm/1646753/CHG123456/<artifact-id>.<version>.zip
 ```
 
 如果公司的 Nexus Raw 仓库路径有特殊要求，可以通过 `--upload-path` 显式指定仓库内路径。
+
+如果要显式指定用于 Airflow CLI 校验的部署配置，可以增加 `--config`，例如：
+
+```bash
+python3 scripts/dag_publish/package_and_upload_dag.py \
+  dags/customer_sync \
+  --environment dev \
+  --config configs/dag_publish/deploy_pipeline.dev.json \
+  --artifact-id customer-sync \
+  --version 1.0.0 \
+  --dry-run
+```
 
 ## DAG 从 Nexus 落地并发布到 Airflow dags
 
