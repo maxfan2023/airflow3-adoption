@@ -284,9 +284,7 @@ def validate_python_sources(sources):
         for source_path, _archive_entry in iter_archive_entries(sources)
         if source_path.suffix.lower() == ".py"
     ]
-    if not python_files:
-        return
-    SyntaxChecker().run(REPO_ROOT, python_files)
+    return SyntaxChecker().check_files(python_files)
 
 
 def debug_print(enabled, message):
@@ -302,11 +300,18 @@ def format_command(command):
     return " ".join(shlex.quote(str(part)) for part in command)
 
 
-def stage_sources_for_airflow_check(sources, staging_root, debug=False):
+def stage_sources_for_airflow_check(sources, staging_root, excluded_python_files=None, debug=False):
     """Copy packaged sources into a temporary directory for Airflow DAG validation."""
     staging_root = Path(staging_root).expanduser().resolve()
+    excluded_python_files = {
+        Path(item).expanduser().resolve() for item in (excluded_python_files or [])
+    }
     staged_files = 0
     for source_path, archive_entry in iter_archive_entries(sources):
+        resolved_source = Path(source_path).expanduser().resolve()
+        if resolved_source in excluded_python_files:
+            debug_print(debug, "Skipped file during Airflow validation staging: {0}".format(resolved_source))
+            continue
         destination = Path(staging_root) / archive_entry
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(str(source_path), str(destination))
@@ -338,7 +343,14 @@ def resolve_airflow_staging_root(dags_folder_value, session_root):
     return staging_root.resolve()
 
 
-def run_airflow_dag_validation(sources, environment, config_path=None, debug=False, input_fn=None):
+def run_airflow_dag_validation(
+    sources,
+    environment,
+    config_path=None,
+    excluded_python_files=None,
+    debug=False,
+    input_fn=None,
+):
     """Run advisory Airflow DAG validation against the staged package contents."""
     warning_message = ""
     debug_print(debug, "Loading deployment config for Airflow validation.")
@@ -368,6 +380,7 @@ def run_airflow_dag_validation(sources, environment, config_path=None, debug=Fal
             stage_sources_for_airflow_check(
                 sources,
                 staging_root,
+                excluded_python_files=excluded_python_files,
                 debug=debug,
             )
             command = build_airflow_validation_command(config)
@@ -595,7 +608,7 @@ def prompt_user_to_continue(input_fn=None):
     if input_fn is None:
         input_fn = input
     try:
-        return input_fn("⚠️ Type 'go' to ignore these issues and continue packaging: ").strip().lower()
+        return input_fn("🛑 Type 'go' to ignore these issues and continue packaging: ").strip().lower()
     except EOFError as exc:
         raise DeploymentError(
             "Validation issues were reported and interactive confirmation was not available."
@@ -604,7 +617,7 @@ def prompt_user_to_continue(input_fn=None):
 
 def confirm_continue_after_validation_issue(heading, message, input_fn=None, debug=False):
     """Show a validation issue and continue only when the user types 'go'."""
-    print("⚠️ {0}".format(heading), file=sys.stderr)
+    print("🚨 {0}".format(heading), file=sys.stderr)
     print(message, file=sys.stderr)
     response = prompt_user_to_continue(input_fn=input_fn)
     debug_print(debug, "User confirmation response after validation warning: {0}".format(response))
@@ -748,32 +761,34 @@ def _run_with_args(args, reporter=None):
 
     reporter.section("🔍", "Run Python Syntax Validation")
     debug_print(args.debug, "Running Python syntax validation for package sources.")
-    syntax_issue_detected = False
-    try:
-        validate_python_sources(sources)
-    except DeploymentError as exc:
-        syntax_issue_detected = True
+    syntax_report = validate_python_sources(sources)
+    syntax_issues_overridden = False
+    if syntax_report.has_errors:
         confirm_continue_after_validation_issue(
             heading="Python syntax validation reported issues.",
-            message=str(exc),
+            message=syntax_report.render_error_message(),
             debug=args.debug,
         )
+        syntax_issues_overridden = True
         reporter.message("⚠️", "Python syntax validation issues were overridden by operator input.")
     else:
         reporter.message("✅", "Python syntax validation passed.")
 
     reporter.section("🐍", "Run Airflow CLI Validation")
-    if syntax_issue_detected:
-        reporter.message("⏭️", "Airflow CLI validation was skipped because syntax issues were overridden.")
-    else:
+    if syntax_report.valid_files:
+        if syntax_issues_overridden:
+            reporter.message("⚠️", "Only syntax-valid Python files will be included in Airflow CLI validation.")
         debug_print(args.debug, "Running advisory Airflow DAG validation.")
         run_airflow_dag_validation(
             sources=sources,
             environment=environment,
             config_path=args.config,
+            excluded_python_files=syntax_report.invalid_files,
             debug=args.debug,
         )
         reporter.message("✅", "Airflow CLI validation finished.")
+    else:
+        reporter.message("⏭️", "Airflow CLI validation was skipped because no syntax-valid Python files were available.")
 
     artifact_id = derive_artifact_id(sources, args.artifact_id)
     version = args.version.strip()
