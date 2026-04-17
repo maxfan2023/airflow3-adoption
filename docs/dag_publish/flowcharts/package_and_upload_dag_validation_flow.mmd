@@ -1,0 +1,46 @@
+flowchart LR
+    A["Input sources"] --> B["iter_archive_entries()"]
+    B --> C["Collect every packaged .py file"]
+
+    subgraph V1["Validation 1: Python syntax"]
+        C --> D["SyntaxChecker.check_files()<br/>ast.parse() on every .py"]
+        D --> E["SyntaxCheckReport<br/>valid_files / invalid_files / error_messages"]
+        E --> F{"Any syntax errors?"}
+        F -- "No" --> G["Keep all Python files"]
+        F -- "Yes" --> F1["Show all syntax errors together<br/>operator may type go"]
+        F1 --> G1["Keep syntax-valid files only"]
+    end
+
+    G --> H
+    G1 --> H
+    H{"Any syntax-valid files left?"}
+    H -- "No" --> Z["Skip Airflow CLI validation<br/>skip DAG rule validation<br/>go to archive step"]
+    H -- "Yes" --> I["Stage syntax-valid files into temporary DAG folder"]
+
+    subgraph V2["Validation 2: Airflow CLI import validation"]
+        I --> J["load_pipeline_config()<br/>render airflow_cli.env"]
+        J --> K["Optional activation_command<br/>source conda + activate env"]
+        K --> L["python -m airflow db migrate"]
+        L --> M["python -m airflow dags list-import-errors -l -o json"]
+        M --> N{"Airflow CLI issues?"}
+        N -- "No" --> O["Proceed to DAG rule validation"]
+        N -- "Yes" --> N1["Show import / environment issues<br/>operator may type go"]
+        N1 --> O
+    end
+
+    subgraph V3["Validation 3: DAG rule validation"]
+        O --> P["Detect Airflow DAG files<br/>classic DAG(...) and @dag"]
+        P --> P1["Ordinary Python file?<br/>Not subject to DAG-only rules"]
+        P1 --> Q["Apply configured rules"]
+        Q --> Q1["Optional dag_id allow/deny regex"]
+        Q1 --> Q2["Optional queue allow/deny regex"]
+        Q2 --> Q3["Top-level variable rules<br/>for example GDT_ET_FEED_SOURCE"]
+        Q3 --> Q4["Missing or invalid value is reported here<br/>not in syntax validation"]
+        Q4 --> R{"Rule issues?"}
+        R -- "No" --> S["All validations passed"]
+        R -- "Yes" --> R1["Show rule violations<br/>operator may type go"]
+        R1 --> S
+    end
+
+    S --> T["create_archive()"]
+    Z --> T
