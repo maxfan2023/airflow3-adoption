@@ -3,9 +3,14 @@
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List
+from typing import Dict, List
 
-from common import build_default_pipeline_config_candidates, normalize_environment, resolve_path
+from common import (
+    build_default_pipeline_config_candidates,
+    normalize_environment,
+    parse_bool,
+    resolve_path,
+)
 from deploy_steps.exceptions import DeploymentError
 
 
@@ -34,6 +39,18 @@ class ArchiveSettings:
 class ChecksumSettings:
     mode: str
     sidecar_suffix: str
+
+
+@dataclass
+class LoggingSettings:
+    directory: Path
+    retention_days: int = 14
+
+
+@dataclass
+class AirflowCliSettings:
+    temp_root: Path
+    env: Dict[str, object] = field(default_factory=dict)
 
 
 @dataclass
@@ -75,6 +92,8 @@ class PipelineConfig:
     nexus: NexusSettings
     archive: ArchiveSettings
     checksum: ChecksumSettings
+    logging: LoggingSettings
+    airflow_cli: AirflowCliSettings
     imports: ImportSettings
     tagging: TaggingSettings
     rules: RulesSettings
@@ -113,6 +132,8 @@ def load_pipeline_config(explicit_path=None, working_root_override=None, environ
     nexus_raw = raw.get("nexus") or {}
     archive_raw = raw.get("archive") or {}
     checksum_raw = raw.get("checksum") or {}
+    logging_raw = raw.get("logging") or {}
+    airflow_cli_raw = raw.get("airflow_cli") or {}
     imports_raw = raw.get("imports") or {}
     tagging_raw = raw.get("tagging") or {}
     rules_raw = raw.get("rules") or {}
@@ -145,6 +166,18 @@ def load_pipeline_config(explicit_path=None, working_root_override=None, environ
         checksum=ChecksumSettings(
             mode=str(_require_key(checksum_raw, "mode")),
             sidecar_suffix=str(checksum_raw.get("sidecar_suffix", ".sha256")),
+        ),
+        logging=LoggingSettings(
+            directory=resolve_path(
+                logging_raw.get("directory", str(working_root.parent / "logs")),
+                base_dir,
+            ),
+            retention_days=int(logging_raw.get("retention_days", 14)),
+        ),
+        airflow_cli=_build_airflow_cli_settings(
+            airflow_cli_raw=airflow_cli_raw,
+            working_root=working_root,
+            base_dir=base_dir,
         ),
         imports=ImportSettings(
             extra_pythonpath=[
@@ -182,6 +215,27 @@ def _build_rule_settings(raw_rule):
     )
 
 
+def _build_airflow_cli_settings(airflow_cli_raw, working_root, base_dir):
+    default_env = {
+        "AIRFLOW__CORE__DAGS_FOLDER": "{session_root}/staging",
+        "AIRFLOW__CORE__LOAD_EXAMPLES": False,
+        "AIRFLOW__DATABASE__SQL_ALCHEMY_CONN": "sqlite:///{session_root}/airflow_metadata.db",
+        "PYTHONDONTWRITEBYTECODE": "1",
+    }
+    custom_env = airflow_cli_raw.get("env") or {}
+    merged_env = dict(default_env)
+    for key, value in custom_env.items():
+        merged_env[str(key)] = value
+
+    return AirflowCliSettings(
+        temp_root=resolve_path(
+            airflow_cli_raw.get("temp_root", str(working_root.parent / "airflow_cli")),
+            base_dir,
+        ),
+        env=merged_env,
+    )
+
+
 def _require_key(mapping, key):
     if key not in mapping:
         raise DeploymentError("Missing required config key: {0}".format(key))
@@ -205,5 +259,30 @@ def _validate_config(config):
         raise DeploymentError("tagging.us_tag must be part of tagging.managed_tags.")
     if config.tagging.global_tag not in config.tagging.managed_tags:
         raise DeploymentError("tagging.global_tag must be part of tagging.managed_tags.")
+    if config.logging.retention_days <= 0:
+        raise DeploymentError("logging.retention_days must be greater than zero.")
+    if "AIRFLOW__CORE__DAGS_FOLDER" not in config.airflow_cli.env:
+        raise DeploymentError("airflow_cli.env must include AIRFLOW__CORE__DAGS_FOLDER.")
+    if "AIRFLOW__CORE__LOAD_EXAMPLES" not in config.airflow_cli.env:
+        raise DeploymentError("airflow_cli.env must include AIRFLOW__CORE__LOAD_EXAMPLES.")
+    if "AIRFLOW__DATABASE__SQL_ALCHEMY_CONN" not in config.airflow_cli.env:
+        raise DeploymentError("airflow_cli.env must include AIRFLOW__DATABASE__SQL_ALCHEMY_CONN.")
+    config.airflow_cli.env["AIRFLOW__CORE__LOAD_EXAMPLES"] = _stringify_env_value(
+        config.airflow_cli.env["AIRFLOW__CORE__LOAD_EXAMPLES"]
+    )
+    config.airflow_cli.env["PYTHONDONTWRITEBYTECODE"] = _stringify_env_value(
+        config.airflow_cli.env.get("PYTHONDONTWRITEBYTECODE", "1")
+    )
     if config.imports.timeout_seconds <= 0:
         raise DeploymentError("imports.timeout_seconds must be greater than zero.")
+
+
+def _stringify_env_value(value):
+    if isinstance(value, bool):
+        return "True" if value else "False"
+    if value is None:
+        return ""
+    text = str(value).strip()
+    if text.lower() in {"true", "false", "yes", "no", "on", "off", "1", "0"}:
+        return "True" if parse_bool(text, default=False) else "False"
+    return text

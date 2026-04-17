@@ -6,6 +6,7 @@ import os
 import sys
 from pathlib import Path
 
+from cli_support import ScriptOutputSession, StepReporter, resolve_runtime_logging_settings
 from common import normalize_environment, parse_bool, resolve_credentials_file, load_properties
 from deploy_steps import (
     ArchiveExtractor,
@@ -78,10 +79,11 @@ def build_release_name(archive_name, allowed_suffixes):
     return "{0}-{1}".format(base_name, session_suffix)
 
 
-def run(argv=None):
+def _run_with_args(args, reporter=None):
     """Execute the deployment pipeline and return a summary dictionary."""
-    args = parse_args(argv)
+    reporter = reporter or StepReporter(enabled=False)
     environment = normalize_environment(args.environment)
+    reporter.section("🧭", "Load Deployment Configuration")
     config = load_pipeline_config(args.config, args.working_root, environment=environment)
     release_name = None
 
@@ -89,6 +91,7 @@ def run(argv=None):
     timeout_seconds = config.nexus.timeout_seconds
     verify_tls = config.nexus.verify_tls
     if args.artifact_url or args.artifact_path:
+        reporter.section("🔐", "Load Nexus Credentials")
         credentials_file = resolve_credentials_file(
             args.credentials_file,
             environment=environment,
@@ -119,6 +122,7 @@ def run(argv=None):
     download_dir = session_root / "downloads"
     extract_dir = session_root / "extracted"
 
+    reporter.section("📥", "Fetch Artifact")
     artifact = fetcher.fetch(
         artifact_url=args.artifact_url,
         artifact_path=args.artifact_path,
@@ -132,6 +136,7 @@ def run(argv=None):
         artifact.local_archive_path.name,
         config.archive.allowed_suffixes,
     )
+    reporter.section("🔐", "Validate Checksum")
     checksum = ChecksumValidator(
         mode=config.checksum.mode,
         sidecar_suffix=config.checksum.sidecar_suffix,
@@ -145,8 +150,10 @@ def run(argv=None):
         allowed_suffixes=config.archive.allowed_suffixes,
         require_single_top_level_dir=config.archive.require_single_top_level_dir,
     )
+    reporter.section("📂", "Extract Archive")
     extracted_root = extractor.extract(artifact.local_archive_path, extract_dir)
 
+    reporter.section("🐍", "Run Python Checks")
     python_checks = PythonCheckOrchestrator(
         [
             SyntaxChecker(),
@@ -161,11 +168,13 @@ def run(argv=None):
     )
     python_checks.run(extracted_root)
 
+    reporter.section("📏", "Run Rule Checks")
     RuleChecker(
         name_rules=config.rules.name_rules,
         queue_rules=config.rules.queue_rules,
     ).validate(extracted_root)
 
+    reporter.section("🏷️", "Process Managed Tags")
     TagProcessor(
         source_variable_name=config.tagging.source_variable_name,
         managed_tags=config.tagging.managed_tags,
@@ -174,6 +183,7 @@ def run(argv=None):
         global_tag=config.tagging.global_tag,
     ).process_package(extracted_root)
 
+    reporter.section("🚚", "Publish Package")
     publish_result = DeploymentPublisher(
         landing_root=config.paths.landing_root,
         dags_root=config.paths.dags_root,
@@ -195,32 +205,51 @@ def run(argv=None):
     }
 
 
+def run(argv=None):
+    """Execute the deployment pipeline and return a summary dictionary."""
+    return _run_with_args(parse_args(argv), reporter=None)
+
+
 def main(argv=None):
     """CLI entry point."""
-    try:
-        result = run(argv)
-        artifact = result["artifact"]
-        checksum = result["checksum"]
-        publish_result = result["publish_result"]
+    args = parse_args(argv)
+    logging_settings = resolve_runtime_logging_settings(
+        explicit_config_path=args.config,
+        environment=args.environment,
+        working_root_override=args.working_root,
+    )
 
-        print("Artifact staged: {0}".format(artifact.local_archive_path))
-        print("Environment: {0}".format(result["environment"]))
-        print("Config file: {0}".format(result["config_path"]))
-        if artifact.resolved_url:
-            print("Artifact URL: {0}".format(artifact.resolved_url))
-        print("SHA256: {0}".format(checksum.actual_sha256))
-        if checksum.expected_sha256:
-            print("Expected SHA256: {0}".format(checksum.expected_sha256))
-        print("Release name: {0}".format(result["release_name"]))
-        print("Landing target: {0}".format(publish_result.landing_release_dir))
-        print("Live target: {0}".format(publish_result.live_target_dir))
-        if publish_result.dry_run:
-            print("Dry run enabled. Landing and live publish steps were skipped.")
-        else:
-            print("Deployment completed successfully.")
-        return 0
-    except (DeploymentError, ValueError) as exc:
-        print("Error: {0}".format(exc), file=sys.stderr)
+    try:
+        with ScriptOutputSession(
+            script_name="deploy_dag_from_nexus",
+            log_directory=logging_settings.directory,
+            retention_days=logging_settings.retention_days,
+        ):
+            reporter = StepReporter(enabled=True)
+            result = _run_with_args(args, reporter=reporter)
+            artifact = result["artifact"]
+            checksum = result["checksum"]
+            publish_result = result["publish_result"]
+
+            reporter.section("📋", "Deployment Summary")
+            reporter.value("📥", "Artifact staged", artifact.local_archive_path)
+            reporter.value("🌍", "Environment", result["environment"])
+            reporter.value("🧾", "Config file", result["config_path"])
+            if artifact.resolved_url:
+                reporter.value("🔗", "Artifact URL", artifact.resolved_url)
+            reporter.value("🔐", "SHA256", checksum.actual_sha256)
+            if checksum.expected_sha256:
+                reporter.value("🧮", "Expected SHA256", checksum.expected_sha256)
+            reporter.value("🏷️", "Release name", result["release_name"])
+            reporter.value("📦", "Landing target", publish_result.landing_release_dir)
+            reporter.value("🚀", "Live target", publish_result.live_target_dir)
+            if publish_result.dry_run:
+                reporter.message("🧪", "Dry run enabled. Landing and live publish steps were skipped.")
+            else:
+                reporter.message("✅", "Deployment completed successfully.")
+            return 0
+    except (DeploymentError, ValueError, OSError) as exc:
+        print("❌ Error: {0}".format(exc), file=sys.stderr)
         return 1
 
 

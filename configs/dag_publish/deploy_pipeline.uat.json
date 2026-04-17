@@ -22,6 +22,19 @@
     "mode": "compute_only",
     "sidecar_suffix": ".sha256"
   },
+  "logging": {
+    "directory": "build/dag_deploy/uat/logs",
+    "retention_days": 14
+  },
+  "airflow_cli": {
+    "temp_root": "build/dag_deploy/uat/airflow_cli",
+    "env": {
+      "AIRFLOW__CORE__DAGS_FOLDER": "{session_root}/staging",
+      "AIRFLOW__CORE__LOAD_EXAMPLES": false,
+      "AIRFLOW__DATABASE__SQL_ALCHEMY_CONN": "sqlite:///{session_root}/airflow_metadata.db",
+      "PYTHONDONTWRITEBYTECODE": "1"
+    }
+  },
   "imports": {
     "extra_pythonpath": [],
     "shell_executable": "/bin/bash",

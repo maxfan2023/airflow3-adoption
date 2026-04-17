@@ -15,6 +15,8 @@ This repository is intentionally minimal for the initial setup. We will add envi
   `configs/dag_publish/nexus_credentials.prod.env.example`
 - 程序支持 `--environment dev|uat|prod`，会优先查找对应环境的凭据文件
 - 打包前会先做 Python 语法检查，并按对应环境的 `deploy_pipeline.<environment>.json` 执行一次 Airflow CLI 校验
+- 终端输出会按步骤分段显示，并带 emoji 标识当前阶段
+- 每次调用都会同时写一份标准输出日志和一份错误日志
 
 ### 凭据文件格式
 
@@ -54,7 +56,9 @@ NEXUS_INSECURE=false
 - 脚本只使用 Python 标准库，不需要额外安装第三方依赖包
 - 脚本已经避免使用 Python 3.9 专属语法，适合 RHEL8 常见的 `python3` 环境
 - 如果 `deploy_pipeline.<environment>.json` 里配置了 `imports.activation_command`，脚本会先激活 Miniconda/Conda 环境，再执行 `airflow db migrate` 和 `airflow dags list-import-errors -l -o json`
-- Airflow CLI 校验发现 import error 或校验环境异常时，脚本会把结果打印到终端，并提示是否继续打包上传
+- Python 语法检查发现错误，或 Airflow CLI 校验发现 import error / 校验环境异常时，脚本会先把错误打印到终端；只有在提示后输入 `go`，才会忽略这些问题继续打包
+- 日志目录和保留天数由 `deploy_pipeline.<environment>.json` 里的 `logging.directory` 与 `logging.retention_days` 控制；脚本启动时会自动清理超过保留天数的旧日志
+- Airflow CLI 校验使用的临时目录和环境变量由 `deploy_pipeline.<environment>.json` 里的 `airflow_cli.temp_root` 与 `airflow_cli.env` 控制，不再固定写死到系统 `/tmp`
 
 ### 使用示例
 
@@ -195,9 +199,27 @@ python3 scripts/dag_publish/deploy_dag_from_nexus.py \
 - `nexus`: `repository_url`、`timeout_seconds`、`verify_tls`
 - `archive`: 允许的压缩包后缀，以及是否强制单顶层目录
 - `checksum`: `compute_only`、`sidecar_file`、`cli_value`
+- `logging`: `directory`、`retention_days`
+- `airflow_cli`: `temp_root`，以及 `env` 中的 `AIRFLOW__CORE__DAGS_FOLDER`、`AIRFLOW__CORE__LOAD_EXAMPLES`、`AIRFLOW__DATABASE__SQL_ALCHEMY_CONN`
 - `imports`: `extra_pythonpath`、`shell_executable`、`activation_command`、`python_executable`、`timeout_seconds`
 - `tagging`: `source` 变量名、US source 列表、受管 tags
 - `rules`: DAG 命名规则和 queue 规则
+
+例如：
+
+```json
+"airflow_cli": {
+  "temp_root": "build/dag_deploy/dev/airflow_cli",
+  "env": {
+    "AIRFLOW__CORE__DAGS_FOLDER": "{session_root}/staging",
+    "AIRFLOW__CORE__LOAD_EXAMPLES": false,
+    "AIRFLOW__DATABASE__SQL_ALCHEMY_CONN": "sqlite:///{session_root}/airflow_metadata.db",
+    "PYTHONDONTWRITEBYTECODE": "1"
+  }
+}
+```
+
+其中 `{session_root}` 会在每次运行时展开成该次校验专用的临时目录。
 
 如果公司环境需要先激活 Miniconda/Conda 才能拿到 Airflow 运行时，请在对应环境配置里填写：
 
