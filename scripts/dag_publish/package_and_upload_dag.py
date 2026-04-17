@@ -47,6 +47,7 @@ from typing import Dict, List, Set, Tuple
 from urllib import error, parse, request
 import zipfile
 
+from cli_support import ScriptOutputSession, StepReporter, resolve_runtime_logging_settings
 from common import (
     build_default_credentials_candidates,
     normalize_environment,
@@ -303,6 +304,7 @@ def format_command(command):
 
 def stage_sources_for_airflow_check(sources, staging_root, debug=False):
     """Copy packaged sources into a temporary directory for Airflow DAG validation."""
+    staging_root = Path(staging_root).expanduser().resolve()
     staged_files = 0
     for source_path, archive_entry in iter_archive_entries(sources):
         destination = Path(staging_root) / archive_entry
@@ -312,6 +314,28 @@ def stage_sources_for_airflow_check(sources, staging_root, debug=False):
         debug_print(debug, "Staged file for Airflow validation: {0} -> {1}".format(source_path, destination))
     debug_print(debug, "Prepared Airflow validation staging directory with {0} files.".format(staged_files))
     return Path(staging_root)
+
+
+def render_airflow_cli_env(raw_env, session_root):
+    """Render per-run Airflow CLI environment overrides."""
+    session_root_text = Path(session_root).expanduser().resolve().as_posix()
+    rendered = {}
+    for key, value in (raw_env or {}).items():
+        if isinstance(value, bool):
+            rendered[str(key)] = "True" if value else "False"
+        elif value is None:
+            rendered[str(key)] = ""
+        else:
+            rendered[str(key)] = str(value).replace("{session_root}", session_root_text)
+    return rendered
+
+
+def resolve_airflow_staging_root(dags_folder_value, session_root):
+    """Resolve the effective staged DAGs folder for Airflow CLI validation."""
+    staging_root = Path(str(dags_folder_value)).expanduser()
+    if not staging_root.is_absolute():
+        staging_root = (Path(session_root).expanduser().resolve() / staging_root).resolve()
+    return staging_root.resolve()
 
 
 def run_airflow_dag_validation(sources, environment, config_path=None, debug=False, input_fn=None):
@@ -327,21 +351,28 @@ def run_airflow_dag_validation(sources, environment, config_path=None, debug=Fal
         )
     else:
         debug_print(debug, "Using deployment config: {0}".format(config.config_path))
-        with tempfile.TemporaryDirectory(prefix="dag_package_airflow_check_") as temp_dir:
-            staging_root = stage_sources_for_airflow_check(
+        config.airflow_cli.temp_root.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(
+            prefix="dag_package_airflow_check_",
+            dir=str(config.airflow_cli.temp_root),
+        ) as temp_dir:
+            session_root = Path(temp_dir).resolve()
+            environment_overrides = render_airflow_cli_env(
+                config.airflow_cli.env,
+                session_root=session_root,
+            )
+            staging_root = resolve_airflow_staging_root(
+                environment_overrides["AIRFLOW__CORE__DAGS_FOLDER"],
+                session_root=session_root,
+            )
+            stage_sources_for_airflow_check(
                 sources,
-                Path(temp_dir) / "staging",
+                staging_root,
                 debug=debug,
             )
             command = build_airflow_validation_command(config)
-            environment_overrides = {
-                "AIRFLOW__CORE__DAGS_FOLDER": str(staging_root),
-                "AIRFLOW__CORE__LOAD_EXAMPLES": "False",
-                "AIRFLOW__DATABASE__SQL_ALCHEMY_CONN": "sqlite:///{0}".format(
-                    (Path(temp_dir) / "airflow_metadata.db").as_posix()
-                ),
-                "PYTHONDONTWRITEBYTECODE": "1",
-            }
+            debug_print(debug, "Airflow CLI temp root: {0}".format(config.airflow_cli.temp_root))
+            debug_print(debug, "Airflow CLI session root: {0}".format(session_root))
             debug_print(debug, "Airflow validation command: {0}".format(format_command(command)))
             debug_print(debug, "Airflow validation environment overrides: {0}".format(environment_overrides))
 
@@ -363,14 +394,12 @@ def run_airflow_dag_validation(sources, environment, config_path=None, debug=Fal
                 warning_message = interpret_airflow_validation_result(completed)
 
     if warning_message:
-        print("Warning: Airflow DAG validation reported issues.", file=sys.stderr)
-        print(warning_message, file=sys.stderr)
-        response = prompt_user_to_continue(input_fn=input_fn)
-        debug_print(debug, "User confirmation response after Airflow validation warning: {0}".format(response))
-        if response not in {"y", "yes"}:
-            raise DeploymentError(
-                "Packaging aborted by user after Airflow DAG validation warning."
-            )
+        confirm_continue_after_validation_issue(
+            heading="Airflow DAG validation reported issues.",
+            message=warning_message,
+            input_fn=input_fn,
+            debug=debug,
+        )
     else:
         debug_print(debug, "Airflow DAG validation completed without import errors.")
 
@@ -562,15 +591,27 @@ def build_airflow_command_failure_message(completed, label):
 
 
 def prompt_user_to_continue(input_fn=None):
-    """Prompt the user to continue after an advisory Airflow validation warning."""
+    """Prompt the user to continue after an advisory validation warning."""
     if input_fn is None:
         input_fn = input
     try:
-        return input_fn("Continue packaging and upload? [y/N]: ").strip().lower()
+        return input_fn("⚠️ Type 'go' to ignore these issues and continue packaging: ").strip().lower()
     except EOFError as exc:
         raise DeploymentError(
-            "Airflow DAG validation reported issues and interactive confirmation was not available."
+            "Validation issues were reported and interactive confirmation was not available."
         ) from exc
+
+
+def confirm_continue_after_validation_issue(heading, message, input_fn=None, debug=False):
+    """Show a validation issue and continue only when the user types 'go'."""
+    print("⚠️ {0}".format(heading), file=sys.stderr)
+    print(message, file=sys.stderr)
+    response = prompt_user_to_continue(input_fn=input_fn)
+    debug_print(debug, "User confirmation response after validation warning: {0}".format(response))
+    if response != "go":
+        raise DeploymentError(
+            "Packaging aborted by user after validation issues were reported."
+        )
 
 
 def build_archive_name(artifact_id, version):
@@ -686,24 +727,45 @@ def upload_archive(
         raise RuntimeError(f"Unable to reach Nexus: {exc.reason}") from exc
 
 
-def main(argv=None):
+def _run_with_args(args, reporter=None):
     """Main flow: read config, package sources, print target, then upload."""
-    args = parse_args(argv)
+    reporter = reporter or StepReporter(enabled=False)
 
+    debug_print(args.debug, "Starting package_and_upload_dag.")
+    environment = normalize_environment(args.environment)
+    debug_print(args.debug, "Selected environment: {0}".format(environment))
+
+    reporter.section("🧭", "Initialize Package Upload")
+    credentials_file = resolve_credentials_file(
+        explicit_path=args.credentials_file,
+        environment=environment,
+    )
+    debug_print(args.debug, "Resolved credentials file: {0}".format(credentials_file))
+    properties = load_properties(credentials_file)
+    sources = normalize_sources(args.sources)
+    debug_print(args.debug, "Normalized {0} source path(s).".format(len(sources)))
+    reporter.message("✅", "Environment and credentials are ready.")
+
+    reporter.section("🔍", "Run Python Syntax Validation")
+    debug_print(args.debug, "Running Python syntax validation for package sources.")
+    syntax_issue_detected = False
     try:
-        debug_print(args.debug, "Starting package_and_upload_dag.")
-        environment = normalize_environment(args.environment)
-        debug_print(args.debug, "Selected environment: {0}".format(environment))
-        credentials_file = resolve_credentials_file(
-            explicit_path=args.credentials_file,
-            environment=environment,
-        )
-        debug_print(args.debug, "Resolved credentials file: {0}".format(credentials_file))
-        properties = load_properties(credentials_file)
-        sources = normalize_sources(args.sources)
-        debug_print(args.debug, "Normalized {0} source path(s).".format(len(sources)))
-        debug_print(args.debug, "Running Python syntax validation for package sources.")
         validate_python_sources(sources)
+    except DeploymentError as exc:
+        syntax_issue_detected = True
+        confirm_continue_after_validation_issue(
+            heading="Python syntax validation reported issues.",
+            message=str(exc),
+            debug=args.debug,
+        )
+        reporter.message("⚠️", "Python syntax validation issues were overridden by operator input.")
+    else:
+        reporter.message("✅", "Python syntax validation passed.")
+
+    reporter.section("🐍", "Run Airflow CLI Validation")
+    if syntax_issue_detected:
+        reporter.message("⏭️", "Airflow CLI validation was skipped because syntax issues were overridden.")
+    else:
         debug_print(args.debug, "Running advisory Airflow DAG validation.")
         run_airflow_dag_validation(
             sources=sources,
@@ -711,55 +773,89 @@ def main(argv=None):
             config_path=args.config,
             debug=args.debug,
         )
-        artifact_id = derive_artifact_id(sources, args.artifact_id)
-        version = args.version.strip()
-        if not version:
-            raise ValueError("--version cannot be empty.")
+        reporter.message("✅", "Airflow CLI validation finished.")
 
-        repository_url = resolve_repository_url(args, properties)
-        username = properties.get("NEXUS_USERNAME")
-        password = properties.get("NEXUS_PASSWORD")
-        if not username or not password:
-            raise ValueError("NEXUS_USERNAME and NEXUS_PASSWORD are required in the credentials file.")
+    artifact_id = derive_artifact_id(sources, args.artifact_id)
+    version = args.version.strip()
+    if not version:
+        raise ValueError("--version cannot be empty.")
 
-        path_prefix = (
-            args.path_prefix
-            or properties.get("NEXUS_PATH_PREFIX")
-            or properties.get("NEXUS_GROUP_ID")
-            or DEFAULT_PATH_PREFIX
-        )
-        timeout = args.timeout or int(properties.get("NEXUS_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS))
-        insecure = args.insecure or parse_bool(properties.get("NEXUS_INSECURE"), default=False)
+    repository_url = resolve_repository_url(args, properties)
+    username = properties.get("NEXUS_USERNAME")
+    password = properties.get("NEXUS_PASSWORD")
+    if not username or not password:
+        raise ValueError("NEXUS_USERNAME and NEXUS_PASSWORD are required in the credentials file.")
 
-        # The archive name is the release artifact developers will see in Nexus.
-        archive_name = build_archive_name(artifact_id, version)
-        output_dir = Path(args.output_dir).expanduser().resolve()
-        debug_print(args.debug, "Creating archive {0} in {1}".format(archive_name, output_dir))
-        archive_path, archive_sha256 = create_archive(sources, output_dir, archive_name)
+    path_prefix = (
+        args.path_prefix
+        or properties.get("NEXUS_PATH_PREFIX")
+        or properties.get("NEXUS_GROUP_ID")
+        or DEFAULT_PATH_PREFIX
+    )
+    timeout = args.timeout or int(properties.get("NEXUS_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS))
+    insecure = args.insecure or parse_bool(properties.get("NEXUS_INSECURE"), default=False)
 
-        # When no custom upload path is given, publish to a predictable path so
-        # downstream deployment pipelines can fetch by artifact coordinates.
-        upload_path = args.upload_path or build_default_upload_path(path_prefix, archive_name)
-        upload_url = build_upload_url(repository_url, upload_path)
-        debug_print(args.debug, "Resolved upload URL: {0}".format(upload_url))
+    reporter.section("📦", "Create Archive")
+    archive_name = build_archive_name(artifact_id, version)
+    output_dir = Path(args.output_dir).expanduser().resolve()
+    debug_print(args.debug, "Creating archive {0} in {1}".format(archive_name, output_dir))
+    archive_path, archive_sha256 = create_archive(sources, output_dir, archive_name)
+    reporter.message("✅", "Archive build completed.")
 
-        print(f"Archive created: {archive_path}")
-        print(f"Environment: {environment}")
-        print(f"Credentials file: {credentials_file}")
-        print(f"SHA256: {archive_sha256}")
-        print(f"Upload target: {upload_url}")
+    reporter.section("☁️", "Prepare Nexus Upload")
+    upload_path = args.upload_path or build_default_upload_path(path_prefix, archive_name)
+    upload_url = build_upload_url(repository_url, upload_path)
+    debug_print(args.debug, "Resolved upload URL: {0}".format(upload_url))
 
-        if args.dry_run:
-            debug_print(args.debug, "Dry-run enabled; upload step skipped.")
-            print("Dry run enabled. Upload skipped.")
-            return 0
-
+    if args.dry_run:
+        debug_print(args.debug, "Dry-run enabled; upload step skipped.")
+    else:
+        reporter.section("🚀", "Upload Archive To Nexus")
         debug_print(args.debug, "Uploading archive to Nexus.")
         upload_archive(upload_url, archive_path, username, password, timeout, insecure)
-        print("Upload completed successfully.")
-        return 0
-    except (DeploymentError, RuntimeError, ValueError) as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+
+    return {
+        "archive_path": archive_path,
+        "archive_sha256": archive_sha256,
+        "environment": environment,
+        "credentials_file": credentials_file,
+        "upload_url": upload_url,
+        "dry_run": args.dry_run,
+        "uploaded": not args.dry_run,
+    }
+
+
+def main(argv=None):
+    """CLI entry point."""
+    args = parse_args(argv)
+    logging_settings = resolve_runtime_logging_settings(
+        explicit_config_path=args.config,
+        environment=args.environment,
+    )
+
+    try:
+        with ScriptOutputSession(
+            script_name="package_and_upload_dag",
+            log_directory=logging_settings.directory,
+            retention_days=logging_settings.retention_days,
+        ):
+            reporter = StepReporter(enabled=True)
+            result = _run_with_args(args, reporter=reporter)
+
+            reporter.section("📋", "Package Upload Summary")
+            reporter.value("📦", "Archive created", result["archive_path"])
+            reporter.value("🌍", "Environment", result["environment"])
+            reporter.value("🔐", "Credentials file", result["credentials_file"])
+            reporter.value("🧮", "SHA256", result["archive_sha256"])
+            reporter.value("🔗", "Upload target", result["upload_url"])
+
+            if result["dry_run"]:
+                reporter.message("🧪", "Dry run enabled. Upload skipped.")
+            else:
+                reporter.message("✅", "Upload completed successfully.")
+            return 0
+    except (DeploymentError, RuntimeError, ValueError, OSError) as exc:
+        print(f"❌ Error: {exc}", file=sys.stderr)
         return 1
 
 

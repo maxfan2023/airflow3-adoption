@@ -1,5 +1,6 @@
 import io
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -10,6 +11,7 @@ import types
 import unittest
 import zipfile
 from contextlib import redirect_stderr
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
 
@@ -20,6 +22,7 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 import package_and_upload_dag
+from cli_support import RuntimeLoggingSettings, cleanup_log_directory
 from deploy_dag_from_nexus import main, run
 from package_and_upload_dag import main as package_and_upload_main
 from deploy_steps.archive import ArchiveExtractor
@@ -59,6 +62,18 @@ class ConfigAndArchiveTests(unittest.TestCase):
                             "mode": "compute_only",
                             "sidecar_suffix": ".sha256"
                         },
+                        "logging": {
+                            "directory": "logs",
+                            "retention_days": 21
+                        },
+                        "airflow_cli": {
+                            "temp_root": "airflow_cli_temp",
+                            "env": {
+                                "AIRFLOW__CORE__DAGS_FOLDER": "{session_root}/custom_staging",
+                                "AIRFLOW__CORE__LOAD_EXAMPLES": False,
+                                "AIRFLOW__DATABASE__SQL_ALCHEMY_CONN": "sqlite:///{session_root}/custom.db"
+                            }
+                        },
                         "imports": {
                             "extra_pythonpath": ["deps"]
                         },
@@ -85,9 +100,40 @@ class ConfigAndArchiveTests(unittest.TestCase):
             self.assertEqual(config.environment, "uat")
             self.assertEqual(config.paths.working_root, (temp_path / "override_work").resolve())
             self.assertEqual(config.paths.landing_root, (temp_path / "landing").resolve())
+            self.assertEqual(config.logging.directory, (temp_path / "logs").resolve())
+            self.assertEqual(config.logging.retention_days, 21)
+            self.assertEqual(config.airflow_cli.temp_root, (temp_path / "airflow_cli_temp").resolve())
+            self.assertEqual(
+                config.airflow_cli.env["AIRFLOW__CORE__DAGS_FOLDER"],
+                "{session_root}/custom_staging",
+            )
+            self.assertEqual(config.airflow_cli.env["AIRFLOW__CORE__LOAD_EXAMPLES"], "False")
             self.assertEqual(config.imports.extra_pythonpath[0], (temp_path / "deps").resolve())
             self.assertEqual(config.imports.python_executable, "python")
             self.assertEqual(config.imports.activation_command, "")
+
+    def test_cleanup_log_directory_keeps_recent_logs_only(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            old_log = temp_path / "old.log"
+            new_log = temp_path / "new.err.log"
+            old_log.write_text("old\n", encoding="utf-8")
+            new_log.write_text("new\n", encoding="utf-8")
+
+            now = 1_800_000_000
+            old_time = now - (20 * 24 * 60 * 60)
+            recent_time = now - (2 * 24 * 60 * 60)
+            os.utime(old_log, (old_time, old_time))
+            os.utime(new_log, (recent_time, recent_time))
+
+            cleanup_log_directory(
+                temp_path,
+                retention_days=7,
+                now=datetime.fromtimestamp(now, tz=timezone.utc),
+            )
+
+            self.assertFalse(old_log.exists())
+            self.assertTrue(new_log.exists())
 
     def test_archive_extractor_rejects_path_traversal(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -196,24 +242,68 @@ class ChecksumAndPythonCheckTests(unittest.TestCase):
 
             stderr = io.StringIO()
             with redirect_stderr(stderr):
-                exit_code = package_and_upload_main(
-                    [
-                        str(bad_dag),
-                        "--artifact-id",
-                        "bad-dag",
-                        "--version",
-                        "1.0.0",
-                        "--credentials-file",
-                        str(credentials_file),
-                        "--dry-run",
-                    ]
-                )
+                with mock.patch.object(
+                    package_and_upload_dag,
+                    "resolve_runtime_logging_settings",
+                    return_value=_runtime_logging_settings(temp_path),
+                ):
+                    with mock.patch("builtins.input", return_value=""):
+                        exit_code = package_and_upload_main(
+                            [
+                                str(bad_dag),
+                                "--artifact-id",
+                                "bad-dag",
+                                "--version",
+                                "1.0.0",
+                                "--credentials-file",
+                                str(credentials_file),
+                                "--dry-run",
+                            ]
+                        )
 
             self.assertEqual(exit_code, 1)
             error_output = stderr.getvalue()
-            self.assertIn("Error: Syntax check failed for", error_output)
+            self.assertIn("Python syntax validation reported issues.", error_output)
+            self.assertIn("Syntax check failed for", error_output)
             self.assertIn("bad_dag.py", error_output)
             self.assertNotIn("Traceback", error_output)
+
+    def test_package_upload_can_continue_after_syntax_error_when_user_types_go(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            bad_python = temp_path / "bad_module.py"
+            bad_python.write_text("def broken(:\n", encoding="utf-8")
+            credentials_file = temp_path / "nexus_credentials.dev.env"
+            credentials_file.write_text(
+                "NEXUS_USERNAME=tester\nNEXUS_PASSWORD=secret\n",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with mock.patch.object(
+                package_and_upload_dag,
+                "resolve_runtime_logging_settings",
+                return_value=_runtime_logging_settings(temp_path),
+            ):
+                with mock.patch("builtins.input", return_value="go"):
+                    with mock.patch("sys.stdout", new=stdout), mock.patch("sys.stderr", new=stderr):
+                        exit_code = package_and_upload_main(
+                            [
+                                str(bad_python),
+                                "--artifact-id",
+                                "bad-python",
+                                "--version",
+                                "1.0.0",
+                                "--credentials-file",
+                                str(credentials_file),
+                                "--dry-run",
+                            ]
+                        )
+
+            self.assertEqual(exit_code, 0)
+            self.assertIn("Syntax check failed for", stderr.getvalue())
+            self.assertIn("Archive created:", stdout.getvalue())
 
     def test_package_upload_warns_on_airflow_check_and_can_continue(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -243,26 +333,32 @@ class ChecksumAndPythonCheckTests(unittest.TestCase):
 
             stdout = io.StringIO()
             stderr = io.StringIO()
+            log_settings = _runtime_logging_settings(temp_path)
             with mock.patch.object(package_and_upload_dag, "load_pipeline_config", return_value=fake_config):
                 with mock.patch.object(
-                    package_and_upload_dag.subprocess,
-                    "run",
-                    side_effect=[migrate_result, airflow_result],
-                ) as run_mock:
-                    with mock.patch("builtins.input", return_value="y") as input_mock:
-                        with mock.patch("sys.stdout", new=stdout), mock.patch("sys.stderr", new=stderr):
-                            exit_code = package_and_upload_main(
-                                [
-                                    str(dag_file),
-                                    "--artifact-id",
-                                    "demo",
-                                    "--version",
-                                    "1.0.0",
-                                    "--credentials-file",
-                                    str(credentials_file),
-                                    "--dry-run",
-                                ]
-                            )
+                    package_and_upload_dag,
+                    "resolve_runtime_logging_settings",
+                    return_value=log_settings,
+                ):
+                    with mock.patch.object(
+                        package_and_upload_dag.subprocess,
+                        "run",
+                        side_effect=[migrate_result, airflow_result],
+                    ) as run_mock:
+                        with mock.patch("builtins.input", return_value="go") as input_mock:
+                            with mock.patch("sys.stdout", new=stdout), mock.patch("sys.stderr", new=stderr):
+                                exit_code = package_and_upload_main(
+                                    [
+                                        str(dag_file),
+                                        "--artifact-id",
+                                        "demo",
+                                        "--version",
+                                        "1.0.0",
+                                        "--credentials-file",
+                                        str(credentials_file),
+                                        "--dry-run",
+                                    ]
+                                )
 
             self.assertEqual(exit_code, 0)
             self.assertTrue(input_mock.called)
@@ -272,9 +368,10 @@ class ChecksumAndPythonCheckTests(unittest.TestCase):
                 run_mock.call_args_list[1].args[0],
                 ["python", "-m", "airflow", "dags", "list-import-errors", "-l", "-o", "json"],
             )
-            self.assertIn("Warning: Airflow DAG validation reported issues.", stderr.getvalue())
+            self.assertIn("Airflow DAG validation reported issues.", stderr.getvalue())
             self.assertIn("Broken DAG: import failed", stderr.getvalue())
             self.assertIn("Archive created:", stdout.getvalue())
+            self.assertEqual(len(sorted((temp_path / "logs").glob("*.log"))), 2)
 
     def test_package_upload_debug_prints_airflow_command(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -305,24 +402,29 @@ class ChecksumAndPythonCheckTests(unittest.TestCase):
             stdout = io.StringIO()
             with mock.patch.object(package_and_upload_dag, "load_pipeline_config", return_value=fake_config):
                 with mock.patch.object(
-                    package_and_upload_dag.subprocess,
-                    "run",
-                    side_effect=[migrate_result, airflow_result],
+                    package_and_upload_dag,
+                    "resolve_runtime_logging_settings",
+                    return_value=_runtime_logging_settings(temp_path),
                 ):
-                    with mock.patch("sys.stdout", new=stdout):
-                        exit_code = package_and_upload_main(
-                            [
-                                str(dag_file),
-                                "--artifact-id",
-                                "demo",
-                                "--version",
-                                "1.0.0",
-                                "--credentials-file",
-                                str(credentials_file),
-                                "--dry-run",
-                                "--debug",
-                            ]
-                        )
+                    with mock.patch.object(
+                        package_and_upload_dag.subprocess,
+                        "run",
+                        side_effect=[migrate_result, airflow_result],
+                    ):
+                        with mock.patch("sys.stdout", new=stdout):
+                            exit_code = package_and_upload_main(
+                                [
+                                    str(dag_file),
+                                    "--artifact-id",
+                                    "demo",
+                                    "--version",
+                                    "1.0.0",
+                                    "--credentials-file",
+                                    str(credentials_file),
+                                    "--dry-run",
+                                    "--debug",
+                                ]
+                            )
 
             self.assertEqual(exit_code, 0)
             debug_output = stdout.getvalue()
@@ -553,6 +655,18 @@ class IntegrationTests(unittest.TestCase):
                         "mode": "compute_only",
                         "sidecar_suffix": ".sha256"
                     },
+                    "logging": {
+                        "directory": str(temp_path / "logs"),
+                        "retention_days": 14
+                    },
+                    "airflow_cli": {
+                        "temp_root": str(temp_path / "airflow_cli"),
+                        "env": {
+                            "AIRFLOW__CORE__DAGS_FOLDER": "{session_root}/staging",
+                            "AIRFLOW__CORE__LOAD_EXAMPLES": False,
+                            "AIRFLOW__DATABASE__SQL_ALCHEMY_CONN": "sqlite:///{session_root}/airflow_metadata.db"
+                        }
+                    },
                     "imports": {
                         "extra_pythonpath": [str(deps_root)],
                         "python_executable": sys.executable,
@@ -595,6 +709,15 @@ def _rule(enabled, allow_patterns, deny_patterns):
 
 
 def _package_validation_config(activation_command=""):
+    airflow_cli = types.SimpleNamespace(
+        temp_root=Path("/tmp/fake_airflow_cli_temp"),
+        env={
+            "AIRFLOW__CORE__DAGS_FOLDER": "{session_root}/staging",
+            "AIRFLOW__CORE__LOAD_EXAMPLES": "False",
+            "AIRFLOW__DATABASE__SQL_ALCHEMY_CONN": "sqlite:///{session_root}/airflow_metadata.db",
+            "PYTHONDONTWRITEBYTECODE": "1",
+        },
+    )
     imports = types.SimpleNamespace(
         extra_pythonpath=[],
         shell_executable="/bin/bash",
@@ -604,7 +727,15 @@ def _package_validation_config(activation_command=""):
     )
     return types.SimpleNamespace(
         config_path=Path("/tmp/fake_deploy_pipeline.dev.json"),
+        airflow_cli=airflow_cli,
         imports=imports,
+    )
+
+
+def _runtime_logging_settings(temp_path):
+    return RuntimeLoggingSettings(
+        directory=(temp_path / "logs").resolve(),
+        retention_days=14,
     )
 
 
