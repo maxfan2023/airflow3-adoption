@@ -79,9 +79,17 @@ class RegexRuleSettings:
 
 
 @dataclass
+class DagVariableRuleSettings:
+    name: str
+    required: bool = True
+    allowed_values: List[str] = field(default_factory=list)
+
+
+@dataclass
 class RulesSettings:
     name_rules: RegexRuleSettings
     queue_rules: RegexRuleSettings
+    dag_variable_rules: List[DagVariableRuleSettings] = field(default_factory=list)
 
 
 @dataclass
@@ -201,6 +209,9 @@ def load_pipeline_config(explicit_path=None, working_root_override=None, environ
         rules=RulesSettings(
             name_rules=_build_rule_settings(rules_raw.get("name_rules") or {}),
             queue_rules=_build_rule_settings(rules_raw.get("queue_rules") or {}),
+            dag_variable_rules=_build_dag_variable_rules(
+                rules_raw.get("dag_variable_rules") or []
+            ),
         ),
     )
     _validate_config(config)
@@ -213,6 +224,19 @@ def _build_rule_settings(raw_rule):
         allow_patterns=[str(item) for item in raw_rule.get("allow_patterns", [])],
         deny_patterns=[str(item) for item in raw_rule.get("deny_patterns", [])],
     )
+
+
+def _build_dag_variable_rules(raw_rules):
+    rules = []
+    for item in raw_rules:
+        rules.append(
+            DagVariableRuleSettings(
+                name=str(_require_key(item, "name")).strip(),
+                required=bool(item.get("required", True)),
+                allowed_values=[str(value) for value in item.get("allowed_values", [])],
+            )
+        )
+    return rules
 
 
 def _build_airflow_cli_settings(airflow_cli_raw, working_root, base_dir):
@@ -275,6 +299,17 @@ def _validate_config(config):
     )
     if config.imports.timeout_seconds <= 0:
         raise DeploymentError("imports.timeout_seconds must be greater than zero.")
+    seen_rule_names = set()
+    for rule in config.rules.dag_variable_rules:
+        if not rule.name:
+            raise DeploymentError("rules.dag_variable_rules[].name cannot be empty.")
+        if rule.name in seen_rule_names:
+            raise DeploymentError(
+                "rules.dag_variable_rules contains duplicate variable name '{0}'.".format(
+                    rule.name
+                )
+            )
+        seen_rule_names.add(rule.name)
 
 
 def _stringify_env_value(value):

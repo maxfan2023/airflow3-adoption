@@ -52,7 +52,7 @@ from common import (
     build_default_credentials_candidates,
     normalize_environment,
 )
-from deploy_steps import DeploymentError, SyntaxChecker, load_pipeline_config
+from deploy_steps import DeploymentError, RuleChecker, SyntaxChecker, load_pipeline_config
 
 
 SCRIPT_PATH = Path(__file__).resolve()
@@ -415,6 +415,60 @@ def run_airflow_dag_validation(
         )
     else:
         debug_print(debug, "Airflow DAG validation completed without import errors.")
+
+
+def run_dag_rule_validation(
+    sources,
+    environment,
+    config_path=None,
+    excluded_python_files=None,
+    debug=False,
+    input_fn=None,
+):
+    """Run configurable DAG rule validation on staged syntax-valid files."""
+    warning_message = ""
+    debug_print(debug, "Loading deployment config for DAG rule validation.")
+    try:
+        config = load_pipeline_config(explicit_path=config_path, environment=environment)
+    except DeploymentError as exc:
+        warning_message = (
+            "DAG rule validation could not start because the deployment config "
+            "could not be loaded.\n{0}".format(exc)
+        )
+    else:
+        debug_print(debug, "Using deployment config for DAG rule validation: {0}".format(config.config_path))
+        config.airflow_cli.temp_root.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(
+            prefix="dag_package_rule_check_",
+            dir=str(config.airflow_cli.temp_root),
+        ) as temp_dir:
+            session_root = Path(temp_dir).resolve()
+            staged_root = session_root / "staging"
+            stage_sources_for_airflow_check(
+                sources,
+                staged_root,
+                excluded_python_files=excluded_python_files,
+                debug=debug,
+            )
+            debug_print(debug, "DAG rule validation staging root: {0}".format(staged_root))
+            try:
+                RuleChecker(
+                    name_rules=config.rules.name_rules,
+                    queue_rules=config.rules.queue_rules,
+                    dag_variable_rules=config.rules.dag_variable_rules,
+                ).validate(staged_root)
+            except DeploymentError as exc:
+                warning_message = str(exc)
+
+    if warning_message:
+        confirm_continue_after_validation_issue(
+            heading="DAG rule validation reported issues.",
+            message=warning_message,
+            input_fn=input_fn,
+            debug=debug,
+        )
+    else:
+        debug_print(debug, "DAG rule validation completed without rule violations.")
 
 
 def build_airflow_validation_command(config):
@@ -787,6 +841,17 @@ def _run_with_args(args, reporter=None):
             debug=args.debug,
         )
         reporter.message("✅", "Airflow CLI validation finished.")
+
+        reporter.section("📏", "Run DAG Rule Validation")
+        debug_print(args.debug, "Running advisory DAG rule validation.")
+        run_dag_rule_validation(
+            sources=sources,
+            environment=environment,
+            config_path=args.config,
+            excluded_python_files=syntax_report.invalid_files,
+            debug=args.debug,
+        )
+        reporter.message("✅", "DAG rule validation finished.")
     else:
         reporter.message("⏭️", "Airflow CLI validation was skipped because no syntax-valid Python files were available.")
 

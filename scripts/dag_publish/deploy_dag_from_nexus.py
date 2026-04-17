@@ -172,6 +172,7 @@ def _run_with_args(args, reporter=None):
     RuleChecker(
         name_rules=config.rules.name_rules,
         queue_rules=config.rules.queue_rules,
+        dag_variable_rules=config.rules.dag_variable_rules,
     ).validate(extracted_root)
 
     reporter.section("🏷️", "Process Managed Tags")
