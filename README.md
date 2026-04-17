@@ -56,7 +56,8 @@ NEXUS_INSECURE=false
 - 脚本只使用 Python 标准库，不需要额外安装第三方依赖包
 - 脚本已经避免使用 Python 3.9 专属语法，适合 RHEL8 常见的 `python3` 环境
 - 如果 `deploy_pipeline.<environment>.json` 里配置了 `imports.activation_command`，脚本会先激活 Miniconda/Conda 环境，再执行 `airflow db migrate` 和 `airflow dags list-import-errors -l -o json`
-- Python 语法检查发现错误，或 Airflow CLI 校验发现 import error / 校验环境异常时，脚本会先把错误打印到终端；只有在提示后输入 `go`，才会忽略这些问题继续打包
+- Python 语法检查会收集所有 `.py` 文件中的语法错误一起展示；如果你输入 `go`，脚本会忽略这些语法问题继续打包，并且只对语法正确的 Python 文件继续做 Airflow CLI 校验
+- Airflow CLI 校验发现 import error / 校验环境异常时，脚本会先把错误打印到终端；只有在提示后输入 `go`，才会忽略这些问题继续打包
 - 日志目录和保留天数由 `deploy_pipeline.<environment>.json` 里的 `logging.directory` 与 `logging.retention_days` 控制；脚本启动时会自动清理超过保留天数的旧日志
 - Airflow CLI 校验使用的临时目录和环境变量由 `deploy_pipeline.<environment>.json` 里的 `airflow_cli.temp_root` 与 `airflow_cli.env` 控制，不再固定写死到系统 `/tmp`
 

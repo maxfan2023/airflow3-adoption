@@ -6,6 +6,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from deploy_steps.exceptions import DeploymentError
@@ -32,19 +33,46 @@ class BasePythonChecker:
         raise NotImplementedError
 
 
+@dataclass
+class SyntaxCheckReport:
+    """Summarize syntax validation results across multiple files."""
+
+    valid_files: list[Path] = field(default_factory=list)
+    invalid_files: list[Path] = field(default_factory=list)
+    error_messages: list[str] = field(default_factory=list)
+
+    @property
+    def has_errors(self):
+        return bool(self.error_messages)
+
+    def render_error_message(self):
+        return "\n".join(self.error_messages)
+
+
 class SyntaxChecker(BasePythonChecker):
     """Validate Python syntax without importing code."""
 
     name = "syntax"
 
-    def run(self, package_root, python_files):
+    def check_files(self, python_files):
+        report = SyntaxCheckReport()
         for python_file in python_files:
             try:
                 ast.parse(python_file.read_text(encoding="utf-8"), filename=str(python_file))
             except SyntaxError as exc:
-                raise DeploymentError(
+                report.invalid_files.append(Path(python_file))
+                report.error_messages.append(
                     "Syntax check failed for {0}: {1}".format(python_file, exc)
-                ) from exc
+                )
+            else:
+                report.valid_files.append(Path(python_file))
+        return report
+
+    def run(self, package_root, python_files):
+        report = self.check_files(python_files)
+        if report.has_errors:
+            raise DeploymentError(report.render_error_message())
+        return report
 
 
 class ImportChecker(BasePythonChecker):

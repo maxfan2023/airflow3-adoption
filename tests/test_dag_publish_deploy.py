@@ -190,6 +190,22 @@ class ChecksumAndPythonCheckTests(unittest.TestCase):
             with self.assertRaises(DeploymentError):
                 orchestrator.run(temp_path)
 
+    def test_syntax_checker_collects_all_invalid_files(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            bad_one = temp_path / "bad_one.py"
+            bad_two = temp_path / "bad_two.py"
+            bad_one.write_text("def broken_one(:\n", encoding="utf-8")
+            bad_two.write_text("if True print('broken')\n", encoding="utf-8")
+
+            report = SyntaxChecker().check_files([bad_one, bad_two])
+
+            self.assertTrue(report.has_errors)
+            self.assertEqual(set(report.invalid_files), {bad_one, bad_two})
+            rendered = report.render_error_message()
+            self.assertIn("bad_one.py", rendered)
+            self.assertIn("bad_two.py", rendered)
+
     def test_import_checker_supports_extra_pythonpath_and_reports_missing_modules(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
@@ -304,6 +320,84 @@ class ChecksumAndPythonCheckTests(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             self.assertIn("Syntax check failed for", stderr.getvalue())
             self.assertIn("Archive created:", stdout.getvalue())
+            self.assertIn("Airflow CLI validation was skipped because no syntax-valid Python files were available.", stdout.getvalue())
+
+    def test_package_upload_runs_airflow_validation_for_valid_files_after_syntax_override(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            bad_python = temp_path / "bad_module.py"
+            good_dag = temp_path / "good_dag.py"
+            bad_python.write_text("def broken(:\n", encoding="utf-8")
+            good_dag.write_text(
+                textwrap.dedent(
+                    """
+                    from airflow import DAG
+
+                    with DAG(dag_id="good_demo"):
+                        pass
+                    """
+                ).strip()
+                + "\n",
+                encoding="utf-8",
+            )
+            credentials_file = temp_path / "nexus_credentials.dev.env"
+            credentials_file.write_text(
+                "NEXUS_USERNAME=tester\nNEXUS_PASSWORD=secret\n",
+                encoding="utf-8",
+            )
+            fake_config = _package_validation_config()
+            fake_config.airflow_cli.temp_root = (temp_path / "airflow_cli").resolve()
+
+            calls = []
+
+            def fake_run(command, **kwargs):
+                calls.append((command, kwargs))
+                env = kwargs.get("env") or {}
+                staged_root = Path(env["AIRFLOW__CORE__DAGS_FOLDER"])
+                self.assertTrue(any(path.name == "good_dag.py" for path in staged_root.rglob("good_dag.py")))
+                self.assertFalse(any(path.name == "bad_module.py" for path in staged_root.rglob("bad_module.py")))
+                if len(calls) == 1:
+                    return subprocess.CompletedProcess(
+                        args=command,
+                        returncode=0,
+                        stdout="Database migrated.\n",
+                        stderr="",
+                    )
+                return subprocess.CompletedProcess(
+                    args=command,
+                    returncode=0,
+                    stdout="[]",
+                    stderr="",
+                )
+
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with mock.patch.object(package_and_upload_dag, "load_pipeline_config", return_value=fake_config):
+                with mock.patch.object(
+                    package_and_upload_dag,
+                    "resolve_runtime_logging_settings",
+                    return_value=_runtime_logging_settings(temp_path),
+                ):
+                    with mock.patch.object(package_and_upload_dag.subprocess, "run", side_effect=fake_run):
+                        with mock.patch("builtins.input", return_value="go"):
+                            with mock.patch("sys.stdout", new=stdout), mock.patch("sys.stderr", new=stderr):
+                                exit_code = package_and_upload_main(
+                                    [
+                                        str(temp_path),
+                                        "--artifact-id",
+                                        "mixed-python",
+                                        "--version",
+                                        "1.0.0",
+                                        "--credentials-file",
+                                        str(credentials_file),
+                                        "--dry-run",
+                                    ]
+                                )
+
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(len(calls), 2)
+            self.assertIn("Only syntax-valid Python files will be included in Airflow CLI validation.", stdout.getvalue())
+            self.assertIn("Syntax check failed for", stderr.getvalue())
 
     def test_package_upload_warns_on_airflow_check_and_can_continue(self):
         with tempfile.TemporaryDirectory() as temp_dir:
