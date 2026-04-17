@@ -19,6 +19,8 @@ from deploy_steps import (
     RuleChecker,
     SyntaxChecker,
     TagProcessor,
+    discover_airflow_dag_files,
+    discover_python_files,
     load_pipeline_config,
     strip_archive_suffix,
 )
@@ -69,6 +71,11 @@ def parse_args(argv=None):
         action="store_true",
         help="Run the full validation flow without writing to landing or dags.",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Print step-by-step debug details, including executed validation commands.",
+    )
     return parser.parse_args(argv)
 
 
@@ -79,12 +86,47 @@ def build_release_name(archive_name, allowed_suffixes):
     return "{0}-{1}".format(base_name, session_suffix)
 
 
+def debug_print(enabled, message):
+    if enabled:
+        print("[DEBUG] {0}".format(message))
+
+
+def build_rule_check_descriptions(rules):
+    descriptions = []
+    if rules.name_rules.enabled:
+        descriptions.append("Validate literal dag_id values against configured allow/deny patterns.")
+    if rules.queue_rules.enabled:
+        descriptions.append("Validate literal task queue values against configured allow/deny patterns.")
+    for rule in rules.dag_variable_rules:
+        if rule.allowed_values:
+            descriptions.append(
+                "Require top-level variable '{0}' on Airflow DAG files with allowed values: {1}.".format(
+                    rule.name,
+                    ", ".join(rule.allowed_values),
+                )
+            )
+        else:
+            descriptions.append(
+                "Require top-level variable '{0}' on Airflow DAG files.".format(rule.name)
+            )
+    return descriptions
+
+
+def report_log_file_locations(session):
+    reporter = StepReporter(enabled=True)
+    reporter.section("🗂️", "Execution Logs")
+    reporter.value("📄", "STDOUT log", session.stdout_log_path)
+    reporter.value("🚨", "STDERR log", session.stderr_log_path)
+
+
 def _run_with_args(args, reporter=None):
     """Execute the deployment pipeline and return a summary dictionary."""
     reporter = reporter or StepReporter(enabled=False)
     environment = normalize_environment(args.environment)
+    debug_print(args.debug, "Selected environment: {0}".format(environment))
     reporter.section("🧭", "Load Deployment Configuration")
     config = load_pipeline_config(args.config, args.working_root, environment=environment)
+    debug_print(args.debug, "Using deployment config: {0}".format(config.config_path))
     release_name = None
 
     credentials = {}
@@ -154,6 +196,12 @@ def _run_with_args(args, reporter=None):
     extracted_root = extractor.extract(artifact.local_archive_path, extract_dir)
 
     reporter.section("🐍", "Run Python Checks")
+    python_files = discover_python_files(extracted_root)
+    reporter.message(
+        "🧪",
+        "Checks: parse each extracted .py file, then import it in the configured Python/Airflow environment.",
+    )
+    reporter.items("📄", "Python files detected", python_files)
     python_checks = PythonCheckOrchestrator(
         [
             SyntaxChecker(),
@@ -163,12 +211,19 @@ def _run_with_args(args, reporter=None):
                 shell_executable=config.imports.shell_executable,
                 python_executable=config.imports.python_executable,
                 timeout_seconds=config.imports.timeout_seconds,
+                debug=args.debug,
             ),
         ]
     )
     python_checks.run(extracted_root)
 
     reporter.section("📏", "Run Rule Checks")
+    reporter.message(
+        "🧪",
+        "Checks: apply configured DAG name, queue, and top-level variable rules.",
+    )
+    reporter.items("🌬️", "Airflow DAG files detected", discover_airflow_dag_files(python_files=python_files))
+    reporter.items("📚", "Configured DAG rule checks", build_rule_check_descriptions(config.rules))
     RuleChecker(
         name_rules=config.rules.name_rules,
         queue_rules=config.rules.queue_rules,
@@ -220,12 +275,15 @@ def main(argv=None):
         working_root_override=args.working_root,
     )
 
+    session = ScriptOutputSession(
+        script_name="deploy_dag_from_nexus",
+        log_directory=logging_settings.directory,
+        retention_days=logging_settings.retention_days,
+    )
+    exit_code = 0
+
     try:
-        with ScriptOutputSession(
-            script_name="deploy_dag_from_nexus",
-            log_directory=logging_settings.directory,
-            retention_days=logging_settings.retention_days,
-        ):
+        with session:
             reporter = StepReporter(enabled=True)
             result = _run_with_args(args, reporter=reporter)
             artifact = result["artifact"]
@@ -248,10 +306,14 @@ def main(argv=None):
                 reporter.message("🧪", "Dry run enabled. Landing and live publish steps were skipped.")
             else:
                 reporter.message("✅", "Deployment completed successfully.")
-            return 0
     except (DeploymentError, ValueError, OSError) as exc:
         print("❌ Error: {0}".format(exc), file=sys.stderr)
-        return 1
+        exit_code = 1
+    finally:
+        if session.stdout_log_path and session.stderr_log_path:
+            report_log_file_locations(session)
+
+    return exit_code
 
 
 def _utc_timestamp():

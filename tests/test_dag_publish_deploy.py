@@ -10,7 +10,6 @@ import textwrap
 import types
 import unittest
 import zipfile
-from contextlib import redirect_stderr
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
@@ -269,14 +268,15 @@ class ChecksumAndPythonCheckTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
+            stdout = io.StringIO()
             stderr = io.StringIO()
-            with redirect_stderr(stderr):
-                with mock.patch.object(
-                    package_and_upload_dag,
-                    "resolve_runtime_logging_settings",
-                    return_value=_runtime_logging_settings(temp_path),
-                ):
-                    with mock.patch("builtins.input", return_value=""):
+            with mock.patch.object(
+                package_and_upload_dag,
+                "resolve_runtime_logging_settings",
+                return_value=_runtime_logging_settings(temp_path),
+            ):
+                with mock.patch("builtins.input", return_value=""):
+                    with mock.patch("sys.stdout", new=stdout), mock.patch("sys.stderr", new=stderr):
                         exit_code = package_and_upload_main(
                             [
                                 str(bad_dag),
@@ -296,6 +296,7 @@ class ChecksumAndPythonCheckTests(unittest.TestCase):
             self.assertIn("Syntax check failed for", error_output)
             self.assertIn("bad_dag.py", error_output)
             self.assertNotIn("Traceback", error_output)
+            self.assertIn("Execution Logs", stdout.getvalue())
 
     def test_package_upload_can_continue_after_syntax_error_when_user_types_go(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -334,6 +335,7 @@ class ChecksumAndPythonCheckTests(unittest.TestCase):
             self.assertIn("Syntax check failed for", stderr.getvalue())
             self.assertIn("Archive created:", stdout.getvalue())
             self.assertIn("Airflow CLI validation was skipped because no syntax-valid Python files were available.", stdout.getvalue())
+            self.assertIn("STDOUT log:", stdout.getvalue())
 
     def test_package_upload_runs_airflow_validation_for_valid_files_after_syntax_override(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -410,6 +412,7 @@ class ChecksumAndPythonCheckTests(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             self.assertEqual(len(calls), 2)
             self.assertIn("Only syntax-valid Python files will be included in Airflow CLI validation.", stdout.getvalue())
+            self.assertIn("Python files staged for Airflow CLI validation", stdout.getvalue())
             self.assertIn("Syntax check failed for", stderr.getvalue())
 
     def test_package_upload_warns_on_airflow_check_and_can_continue(self):
@@ -478,6 +481,7 @@ class ChecksumAndPythonCheckTests(unittest.TestCase):
             self.assertIn("Airflow DAG validation reported issues.", stderr.getvalue())
             self.assertIn("Broken DAG: import failed", stderr.getvalue())
             self.assertIn("Archive created:", stdout.getvalue())
+            self.assertIn("STDERR log:", stdout.getvalue())
             self.assertEqual(len(sorted((temp_path / "logs").glob("*.log"))), 2)
 
     def test_package_upload_warns_on_dag_variable_rule_and_can_continue(self):
@@ -555,6 +559,85 @@ class ChecksumAndPythonCheckTests(unittest.TestCase):
             self.assertIn("DAG rule validation reported issues.", stderr.getvalue())
             self.assertIn("GDT_ET_FEED_SOURCE", stderr.getvalue())
             self.assertIn("Archive created:", stdout.getvalue())
+            self.assertIn("Configured DAG rule checks", stdout.getvalue())
+
+    def test_package_upload_warns_on_decorated_dag_missing_feed_source(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            dag_file = temp_path / "decorated_dag.py"
+            dag_file.write_text(
+                textwrap.dedent(
+                    """
+                    from airflow.decorators import dag
+
+                    @dag(schedule=None, start_date=None)
+                    def demo():
+                        return None
+                    """
+                ).strip()
+                + "\n",
+                encoding="utf-8",
+            )
+            credentials_file = temp_path / "nexus_credentials.dev.env"
+            credentials_file.write_text(
+                "NEXUS_USERNAME=tester\nNEXUS_PASSWORD=secret\n",
+                encoding="utf-8",
+            )
+            fake_config = _package_validation_config()
+            fake_config.airflow_cli.temp_root = (temp_path / "airflow_cli").resolve()
+            fake_config.rules.dag_variable_rules = [
+                types.SimpleNamespace(
+                    name="GDT_ET_FEED_SOURCE",
+                    required=True,
+                    allowed_values=["camp-us", "ucm", "norkom", "na"],
+                )
+            ]
+            migrate_result = subprocess.CompletedProcess(
+                args=["python", "-m", "airflow", "db", "migrate"],
+                returncode=0,
+                stdout="Database migrated.\n",
+                stderr="",
+            )
+            airflow_result = subprocess.CompletedProcess(
+                args=["python", "-m", "airflow", "dags", "list-import-errors", "-l", "-o", "json"],
+                returncode=0,
+                stdout="[]",
+                stderr="",
+            )
+
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with mock.patch.object(package_and_upload_dag, "load_pipeline_config", return_value=fake_config):
+                with mock.patch.object(
+                    package_and_upload_dag,
+                    "resolve_runtime_logging_settings",
+                    return_value=_runtime_logging_settings(temp_path),
+                ):
+                    with mock.patch.object(
+                        package_and_upload_dag.subprocess,
+                        "run",
+                        side_effect=[migrate_result, airflow_result],
+                    ):
+                        with mock.patch("builtins.input", return_value="go"):
+                            with mock.patch("sys.stdout", new=stdout), mock.patch("sys.stderr", new=stderr):
+                                exit_code = package_and_upload_main(
+                                    [
+                                        str(dag_file),
+                                        "--artifact-id",
+                                        "decorated-demo",
+                                        "--version",
+                                        "1.0.0",
+                                        "--credentials-file",
+                                        str(credentials_file),
+                                        "--dry-run",
+                                    ]
+                                )
+
+            self.assertEqual(exit_code, 0)
+            self.assertIn("Airflow DAG files detected", stdout.getvalue())
+            self.assertIn("decorated_dag.py", stdout.getvalue())
+            self.assertIn("DAG rule validation reported issues.", stderr.getvalue())
+            self.assertIn("GDT_ET_FEED_SOURCE", stderr.getvalue())
 
     def test_package_upload_debug_prints_airflow_command(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -617,6 +700,7 @@ class ChecksumAndPythonCheckTests(unittest.TestCase):
             self.assertIn("Airflow validation command:", debug_output)
             self.assertIn("python -m airflow dags list-import-errors -l -o json", debug_output)
             self.assertIn("Executing shell command:", debug_output)
+            self.assertIn("Python files staged for Airflow CLI validation", debug_output)
 
 
 class TagAndRuleTests(unittest.TestCase):
@@ -766,6 +850,38 @@ class TagAndRuleTests(unittest.TestCase):
             )
             checker.validate(temp_path)
 
+    def test_rule_checker_treats_decorated_functions_as_airflow_dags(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            dag_file = temp_path / "decorated_dag.py"
+            dag_file.write_text(
+                textwrap.dedent(
+                    """
+                    from airflow.decorators import dag
+
+                    @dag(schedule=None, start_date=None)
+                    def demo():
+                        return None
+                    """
+                ).strip()
+                + "\n",
+                encoding="utf-8",
+            )
+            checker = RuleChecker(
+                name_rules=_rule(enabled=False, allow_patterns=[], deny_patterns=[]),
+                queue_rules=_rule(enabled=False, allow_patterns=[], deny_patterns=[]),
+                dag_variable_rules=[
+                    types.SimpleNamespace(
+                        name="GDT_ET_FEED_SOURCE",
+                        required=True,
+                        allowed_values=["camp-us", "ucm", "norkom", "na"],
+                    )
+                ],
+            )
+            with self.assertRaises(DeploymentError) as error_context:
+                checker.validate(temp_path)
+            self.assertIn("GDT_ET_FEED_SOURCE", str(error_context.exception))
+
 
 class IntegrationTests(unittest.TestCase):
     def test_deploy_pipeline_dry_run_and_real_publish(self):
@@ -799,6 +915,32 @@ class IntegrationTests(unittest.TestCase):
             self.assertTrue(landing_file.is_file())
             self.assertFalse(any((temp_path / "landing").glob("**/__pycache__")))
             self.assertFalse(any((temp_path / "dags").glob("**/__pycache__")))
+
+    def test_deploy_pipeline_reports_detected_files_and_log_locations(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            archive_path = self._build_demo_archive(temp_path / "demo.zip")
+            config_path = self._write_config(temp_path, enable_rules=True)
+
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with mock.patch("sys.stdout", new=stdout), mock.patch("sys.stderr", new=stderr):
+                exit_code = main(
+                    [
+                        "--archive-file",
+                        str(archive_path),
+                        "--config",
+                        str(config_path),
+                        "--dry-run",
+                        "--debug",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            self.assertIn("Python files detected", stdout.getvalue())
+            self.assertIn("Airflow DAG files detected", stdout.getvalue())
+            self.assertIn("Execution Logs", stdout.getvalue())
+            self.assertIn("STDOUT log:", stdout.getvalue())
 
     def test_publish_rolls_back_on_rename_failure(self):
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -128,6 +128,18 @@ class StepReporter:
         stream = stream or sys.stdout
         print("{0} {1}: {2}".format(emoji, label, value), file=stream)
 
+    def items(self, emoji, label, values, stream=None):
+        if not self.enabled:
+            return
+        stream = stream or sys.stdout
+        values = list(values or [])
+        if not values:
+            print("{0} {1}: none".format(emoji, label), file=stream)
+            return
+        print("{0} {1}:".format(emoji, label), file=stream)
+        for value in values:
+            print("   - {0}".format(value), file=stream)
+
 
 def cleanup_log_directory(log_directory, retention_days, now=None):
     """Delete log files older than the retention window."""

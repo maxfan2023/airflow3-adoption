@@ -87,6 +87,7 @@ class ImportChecker(BasePythonChecker):
         shell_executable="/bin/bash",
         python_executable=None,
         timeout_seconds=300,
+        debug=False,
     ):
         self.extra_pythonpath = [
             Path(item).expanduser().resolve() for item in (extra_pythonpath or [])
@@ -95,6 +96,7 @@ class ImportChecker(BasePythonChecker):
         self.shell_executable = str(shell_executable or "/bin/bash")
         self.python_executable = str(python_executable or sys.executable)
         self.timeout_seconds = int(timeout_seconds)
+        self.debug = bool(debug)
 
     def run(self, package_root, python_files):
         import_root = Path(package_root).expanduser().resolve().parent
@@ -103,9 +105,11 @@ class ImportChecker(BasePythonChecker):
         command = self._build_probe_command(import_root, package_root, module_names)
         environment = os.environ.copy()
         environment["PYTHONDONTWRITEBYTECODE"] = "1"
+        _debug_print(self.debug, "Import check targets: {0}".format(", ".join(module_names)))
 
         try:
             if self.activation_command:
+                _debug_print(self.debug, "Import check shell command: {0}".format(command))
                 completed = subprocess.run(
                     [self.shell_executable, "-lc", command],
                     capture_output=True,
@@ -115,6 +119,7 @@ class ImportChecker(BasePythonChecker):
                     check=False,
                 )
             else:
+                _debug_print(self.debug, "Import check command: {0}".format(_format_command(command)))
                 completed = subprocess.run(
                     command,
                     capture_output=True,
@@ -172,6 +177,17 @@ def _remove_python_cache_artifacts(package_root):
     for compiled_file in Path(package_root).rglob("*.py[co]"):
         if compiled_file.is_file():
             compiled_file.unlink()
+
+
+def _format_command(command):
+    if isinstance(command, str):
+        return command
+    return " ".join(shlex.quote(str(item)) for item in command)
+
+
+def _debug_print(enabled, message):
+    if enabled:
+        print("[DEBUG] {0}".format(message))
 
 
 class PythonCheckOrchestrator:
