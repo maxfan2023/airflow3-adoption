@@ -11,14 +11,16 @@ from deploy_steps.python_checks import discover_python_files
 class RuleChecker:
     """Validate DAG IDs and task queues with configurable regex rules."""
 
-    def __init__(self, name_rules, queue_rules):
+    def __init__(self, name_rules, queue_rules, dag_variable_rules=None):
         self.name_rules = name_rules
         self.queue_rules = queue_rules
+        self.dag_variable_rules = list(dag_variable_rules or [])
 
     def validate(self, package_root):
         python_files = discover_python_files(package_root)
         all_dag_ids = []
         all_queues = []
+        dag_variable_errors = []
 
         for python_file in python_files:
             tree = ast.parse(python_file.read_text(encoding="utf-8"), filename=str(python_file))
@@ -35,6 +37,14 @@ class RuleChecker:
                     queue_name = self._extract_literal_string(queue_value, python_file, "queue")
                     all_queues.append((python_file, queue_name))
 
+            if self.dag_variable_rules and visitor.dag_calls:
+                dag_variable_errors.extend(
+                    self._validate_dag_variables(
+                        python_file=python_file,
+                        assignments=visitor.module_assignments,
+                    )
+                )
+
         if self.name_rules.enabled:
             if not all_dag_ids:
                 raise DeploymentError("No DAG definitions with literal dag_id values were found.")
@@ -42,6 +52,9 @@ class RuleChecker:
 
         if self.queue_rules.enabled and all_queues:
             self._apply_rules(all_queues, self.queue_rules, "queue")
+
+        if dag_variable_errors:
+            raise DeploymentError("\n".join(dag_variable_errors))
 
     def _extract_dag_id(self, dag_call, python_file):
         for keyword in dag_call.keywords:
@@ -84,11 +97,52 @@ class RuleChecker:
                     )
                 )
 
+    def _validate_dag_variables(self, python_file, assignments):
+        errors = []
+        for rule in self.dag_variable_rules:
+            assignment = assignments.get(rule.name)
+            if assignment is None:
+                if rule.required:
+                    errors.append(
+                        "Airflow DAG file {0} must define top-level variable '{1}'.".format(
+                            python_file,
+                            rule.name,
+                        )
+                    )
+                continue
+
+            literal_value = assignment.get("value")
+            if literal_value is None:
+                errors.append(
+                    "Variable '{0}' in {1} must be a string literal so it can be validated.".format(
+                        rule.name,
+                        python_file,
+                    )
+                )
+                continue
+
+            if rule.allowed_values and literal_value not in set(rule.allowed_values):
+                errors.append(
+                    "Variable '{0}' in {1} must be one of: {2}. Current value: {3!r}.".format(
+                        rule.name,
+                        python_file,
+                        ", ".join(rule.allowed_values),
+                        literal_value,
+                    )
+                )
+        return errors
+
 
 class _DagRuleVisitor(ast.NodeVisitor):
     def __init__(self):
         self.dag_calls = []
         self.queue_values = []
+        self.module_assignments = {}
+
+    def visit_Module(self, node):
+        for statement in node.body:
+            _collect_module_assignment(statement, self.module_assignments)
+        self.generic_visit(node)
 
     def visit_Call(self, node):
         if _is_dag_call(node):
@@ -107,3 +161,19 @@ def _is_dag_call(node):
     if isinstance(node.func, ast.Attribute):
         return node.func.attr == "DAG"
     return False
+
+
+def _collect_module_assignment(statement, assignments):
+    if isinstance(statement, ast.Assign):
+        value = _extract_string_literal(statement.value)
+        for target in statement.targets:
+            if isinstance(target, ast.Name):
+                assignments[target.id] = {"value": value}
+    elif isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name):
+        assignments[statement.target.id] = {"value": _extract_string_literal(statement.value)}
+
+
+def _extract_string_literal(node):
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    return None

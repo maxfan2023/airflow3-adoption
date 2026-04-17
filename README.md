@@ -58,6 +58,7 @@ NEXUS_INSECURE=false
 - 如果 `deploy_pipeline.<environment>.json` 里配置了 `imports.activation_command`，脚本会先激活 Miniconda/Conda 环境，再执行 `airflow db migrate` 和 `airflow dags list-import-errors -l -o json`
 - Python 语法检查会收集所有 `.py` 文件中的语法错误一起展示；如果你输入 `go`，脚本会忽略这些语法问题继续打包，并且只对语法正确的 Python 文件继续做 Airflow CLI 校验
 - Airflow CLI 校验发现 import error / 校验环境异常时，脚本会先把错误打印到终端；只有在提示后输入 `go`，才会忽略这些问题继续打包
+- Airflow CLI 校验通过后，脚本还会按 `deploy_pipeline.<environment>.json` 里的 `rules` 做 DAG 规则检查；默认会检查 Airflow DAG 文件里是否定义了 `GDT_ET_FEED_SOURCE`，以及它的值是否属于配置允许列表
 - 日志目录和保留天数由 `deploy_pipeline.<environment>.json` 里的 `logging.directory` 与 `logging.retention_days` 控制；脚本启动时会自动清理超过保留天数的旧日志
 - Airflow CLI 校验使用的临时目录和环境变量由 `deploy_pipeline.<environment>.json` 里的 `airflow_cli.temp_root` 与 `airflow_cli.env` 控制，不再固定写死到系统 `/tmp`
 
@@ -144,7 +145,7 @@ python3 scripts/dag_publish/package_and_upload_dag.py \
 - 安全解包
 - Python 语法检查
 - import 检查
-- DAG `dag_id` / `queue` 规则检查
+- DAG `dag_id` / `queue` / 顶层变量 规则检查
 - 根据顶层 `source` 变量改写受管 tags
 - 落地到 landing zone
 - 以 backup + rename + rollback 的方式发布到 `dags`
@@ -204,7 +205,7 @@ python3 scripts/dag_publish/deploy_dag_from_nexus.py \
 - `airflow_cli`: `temp_root`，以及 `env` 中的 `AIRFLOW__CORE__DAGS_FOLDER`、`AIRFLOW__CORE__LOAD_EXAMPLES`、`AIRFLOW__DATABASE__SQL_ALCHEMY_CONN`
 - `imports`: `extra_pythonpath`、`shell_executable`、`activation_command`、`python_executable`、`timeout_seconds`
 - `tagging`: `source` 变量名、US source 列表、受管 tags
-- `rules`: DAG 命名规则和 queue 规则
+- `rules`: DAG 命名规则、queue 规则，以及 DAG 顶层变量规则
 
 例如：
 
@@ -219,6 +220,36 @@ python3 scripts/dag_publish/deploy_dag_from_nexus.py \
   }
 }
 ```
+
+`rules.dag_variable_rules` 支持把 DAG 顶层变量检查做成纯配置，例如：
+
+```json
+"rules": {
+  "name_rules": {
+    "enabled": false,
+    "allow_patterns": [],
+    "deny_patterns": []
+  },
+  "queue_rules": {
+    "enabled": false,
+    "allow_patterns": [],
+    "deny_patterns": []
+  },
+  "dag_variable_rules": [
+    {
+      "name": "GDT_ET_FEED_SOURCE",
+      "required": true,
+      "allowed_values": ["camp-us", "ucm", "norkom", "na"]
+    }
+  ]
+}
+```
+
+默认行为是：
+
+- 只对检测到 `DAG(...)` 定义的 Airflow DAG 文件生效
+- 普通 Python 文件不会因为缺少这些变量而报错
+- 变量必须定义在模块顶层，并且必须是字符串字面量，才能被自动校验
 
 其中 `{session_root}` 会在每次运行时展开成该次校验专用的临时目录。
 

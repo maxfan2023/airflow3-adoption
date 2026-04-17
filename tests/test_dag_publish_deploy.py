@@ -86,7 +86,14 @@ class ConfigAndArchiveTests(unittest.TestCase):
                         },
                         "rules": {
                             "name_rules": {"enabled": False},
-                            "queue_rules": {"enabled": False}
+                            "queue_rules": {"enabled": False},
+                            "dag_variable_rules": [
+                                {
+                                    "name": "GDT_ET_FEED_SOURCE",
+                                    "required": True,
+                                    "allowed_values": ["camp-us", "ucm", "norkom", "na"]
+                                }
+                            ]
                         }
                     }
                 ),
@@ -111,6 +118,12 @@ class ConfigAndArchiveTests(unittest.TestCase):
             self.assertEqual(config.imports.extra_pythonpath[0], (temp_path / "deps").resolve())
             self.assertEqual(config.imports.python_executable, "python")
             self.assertEqual(config.imports.activation_command, "")
+            self.assertEqual(len(config.rules.dag_variable_rules), 1)
+            self.assertEqual(config.rules.dag_variable_rules[0].name, "GDT_ET_FEED_SOURCE")
+            self.assertEqual(
+                config.rules.dag_variable_rules[0].allowed_values,
+                ["camp-us", "ucm", "norkom", "na"],
+            )
 
     def test_cleanup_log_directory_keeps_recent_logs_only(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -467,6 +480,82 @@ class ChecksumAndPythonCheckTests(unittest.TestCase):
             self.assertIn("Archive created:", stdout.getvalue())
             self.assertEqual(len(sorted((temp_path / "logs").glob("*.log"))), 2)
 
+    def test_package_upload_warns_on_dag_variable_rule_and_can_continue(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            dag_file = temp_path / "example_dag.py"
+            dag_file.write_text(
+                textwrap.dedent(
+                    """
+                    from airflow import DAG
+
+                    with DAG(dag_id="demo"):
+                        pass
+                    """
+                ).strip()
+                + "\n",
+                encoding="utf-8",
+            )
+            credentials_file = temp_path / "nexus_credentials.dev.env"
+            credentials_file.write_text(
+                "NEXUS_USERNAME=tester\nNEXUS_PASSWORD=secret\n",
+                encoding="utf-8",
+            )
+            fake_config = _package_validation_config()
+            fake_config.airflow_cli.temp_root = (temp_path / "airflow_cli").resolve()
+            fake_config.rules.dag_variable_rules = [
+                types.SimpleNamespace(
+                    name="GDT_ET_FEED_SOURCE",
+                    required=True,
+                    allowed_values=["camp-us", "ucm", "norkom", "na"],
+                )
+            ]
+            migrate_result = subprocess.CompletedProcess(
+                args=["python", "-m", "airflow", "db", "migrate"],
+                returncode=0,
+                stdout="Database migrated.\n",
+                stderr="",
+            )
+            airflow_result = subprocess.CompletedProcess(
+                args=["python", "-m", "airflow", "dags", "list-import-errors", "-l", "-o", "json"],
+                returncode=0,
+                stdout="[]",
+                stderr="",
+            )
+
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with mock.patch.object(package_and_upload_dag, "load_pipeline_config", return_value=fake_config):
+                with mock.patch.object(
+                    package_and_upload_dag,
+                    "resolve_runtime_logging_settings",
+                    return_value=_runtime_logging_settings(temp_path),
+                ):
+                    with mock.patch.object(
+                        package_and_upload_dag.subprocess,
+                        "run",
+                        side_effect=[migrate_result, airflow_result],
+                    ):
+                        with mock.patch("builtins.input", return_value="go"):
+                            with mock.patch("sys.stdout", new=stdout), mock.patch("sys.stderr", new=stderr):
+                                exit_code = package_and_upload_main(
+                                    [
+                                        str(dag_file),
+                                        "--artifact-id",
+                                        "demo",
+                                        "--version",
+                                        "1.0.0",
+                                        "--credentials-file",
+                                        str(credentials_file),
+                                        "--dry-run",
+                                    ]
+                                )
+
+            self.assertEqual(exit_code, 0)
+            self.assertIn("DAG rule validation reported issues.", stderr.getvalue())
+            self.assertIn("GDT_ET_FEED_SOURCE", stderr.getvalue())
+            self.assertIn("Archive created:", stdout.getvalue())
+
     def test_package_upload_debug_prints_airflow_command(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
@@ -589,6 +678,7 @@ class TagAndRuleTests(unittest.TestCase):
             dag_file.write_text(
                 textwrap.dedent(
                     """
+                    GDT_ET_FEED_SOURCE = "camp-us"
                     dag = DAG(dag_id="customer_sync_demo")
                     task = DummyOperator(task_id="run", queue="default")
                     """
@@ -598,15 +688,83 @@ class TagAndRuleTests(unittest.TestCase):
             checker = RuleChecker(
                 name_rules=_rule(enabled=True, allow_patterns=["^customer_sync_"], deny_patterns=[]),
                 queue_rules=_rule(enabled=True, allow_patterns=["^default$"], deny_patterns=["^forbidden$"]),
+                dag_variable_rules=[],
             )
             checker.validate(temp_path)
 
             dag_file.write_text(
-                'dag = DAG(dag_id="wrong_name")\n',
+                'GDT_ET_FEED_SOURCE = "camp-us"\ndag = DAG(dag_id="wrong_name")\n',
                 encoding="utf-8",
             )
             with self.assertRaises(DeploymentError):
                 checker.validate(temp_path)
+
+    def test_rule_checker_requires_configured_dag_variable_for_airflow_files_only(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            dag_file = temp_path / "rule_dag.py"
+            helper_file = temp_path / "helper.py"
+            dag_file.write_text(
+                textwrap.dedent(
+                    """
+                    from airflow import DAG
+
+                    with DAG(dag_id="customer_sync_demo"):
+                        pass
+                    """
+                ).strip()
+                + "\n",
+                encoding="utf-8",
+            )
+            helper_file.write_text("print('plain python file')\n", encoding="utf-8")
+            checker = RuleChecker(
+                name_rules=_rule(enabled=False, allow_patterns=[], deny_patterns=[]),
+                queue_rules=_rule(enabled=False, allow_patterns=[], deny_patterns=[]),
+                dag_variable_rules=[
+                    types.SimpleNamespace(
+                        name="GDT_ET_FEED_SOURCE",
+                        required=True,
+                        allowed_values=["camp-us", "ucm", "norkom", "na"],
+                    )
+                ],
+            )
+            with self.assertRaises(DeploymentError) as error_context:
+                checker.validate(temp_path)
+            self.assertIn("GDT_ET_FEED_SOURCE", str(error_context.exception))
+
+            dag_file.write_text(
+                textwrap.dedent(
+                    """
+                    from airflow import DAG
+
+                    GDT_ET_FEED_SOURCE = "invalid-source"
+
+                    with DAG(dag_id="customer_sync_demo"):
+                        pass
+                    """
+                ).strip()
+                + "\n",
+                encoding="utf-8",
+            )
+            with self.assertRaises(DeploymentError) as error_context:
+                checker.validate(temp_path)
+            self.assertIn("must be one of", str(error_context.exception))
+
+            dag_file.write_text(
+                textwrap.dedent(
+                    """
+                    from airflow import DAG
+
+                    GDT_ET_FEED_SOURCE = "na"
+
+                    with DAG(dag_id="customer_sync_demo"):
+                        pass
+                    """
+                ).strip()
+                + "\n",
+                encoding="utf-8",
+            )
+            checker.validate(temp_path)
 
 
 class IntegrationTests(unittest.TestCase):
@@ -682,6 +840,7 @@ class IntegrationTests(unittest.TestCase):
                 from airflow import DAG
                 from airflow.operators.empty import EmptyOperator
 
+                GDT_ET_FEED_SOURCE = "camp-us"
                 source = "camp-us"
 
                 with DAG(
@@ -783,7 +942,14 @@ class IntegrationTests(unittest.TestCase):
                             "enabled": enable_rules,
                             "allow_patterns": ["^default$"],
                             "deny_patterns": []
-                        }
+                        },
+                        "dag_variable_rules": [
+                            {
+                                "name": "GDT_ET_FEED_SOURCE",
+                                "required": True,
+                                "allowed_values": ["camp-us", "ucm", "norkom", "na"]
+                            }
+                        ]
                     }
                 }
             ),
@@ -819,10 +985,16 @@ def _package_validation_config(activation_command=""):
         python_executable="python",
         timeout_seconds=30,
     )
+    rules = types.SimpleNamespace(
+        name_rules=_rule(enabled=False, allow_patterns=[], deny_patterns=[]),
+        queue_rules=_rule(enabled=False, allow_patterns=[], deny_patterns=[]),
+        dag_variable_rules=[],
+    )
     return types.SimpleNamespace(
         config_path=Path("/tmp/fake_deploy_pipeline.dev.json"),
         airflow_cli=airflow_cli,
         imports=imports,
+        rules=rules,
     )
 
 

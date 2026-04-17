@@ -67,6 +67,18 @@
       "enabled": false,
       "allow_patterns": [],
       "deny_patterns": []
-    }
+    },
+    "dag_variable_rules": [
+      {
+        "name": "GDT_ET_FEED_SOURCE",
+        "required": true,
+        "allowed_values": [
+          "camp-us",
+          "ucm",
+          "norkom",
+          "na"
+        ]
+      }
+    ]
   }
 }
