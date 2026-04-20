@@ -23,6 +23,7 @@ from deploy_steps import (
     discover_python_files,
     load_pipeline_config,
     strip_archive_suffix,
+    validate_package_with_airflow_cli,
 )
 
 
@@ -228,6 +229,15 @@ def _run_with_args(args, reporter=None):
         ]
     )
     python_checks.run(extracted_root)
+
+    reporter.section("🌬️", "Run Airflow CLI Validation")
+    validate_package_with_airflow_cli(
+        package_root=extracted_root,
+        airflow_cli_settings=config.airflow_cli,
+        import_settings=config.imports,
+        reporter=reporter,
+        debug=args.debug,
+    )
 
     reporter.section("📏", "Run Rule Checks")
     reporter.message(
