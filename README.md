@@ -155,6 +155,7 @@ python3 scripts/dag_publish/package_and_upload_dag.py \
 - 安全解包
 - Python 语法检查
 - import 检查
+- Airflow CLI 检查
 - DAG `dag_id` / `queue` / 顶层变量 规则检查
 - 根据顶层 `source` 变量改写受管 tags
 - 落地到 landing zone
@@ -214,6 +215,7 @@ python3 scripts/dag_publish/deploy_dag_from_nexus.py \
 - `logging`: `directory`、`retention_days`
 - `airflow_cli`: `temp_root`，以及 `env` 中的 `AIRFLOW__CORE__DAGS_FOLDER`、`AIRFLOW__CORE__LOAD_EXAMPLES`、`AIRFLOW__DATABASE__SQL_ALCHEMY_CONN`
 - `imports`: `extra_pythonpath`、`shell_executable`、`activation_command`、`python_executable`、`timeout_seconds`
+- 部署脚本会在解包后执行 `python -m airflow db migrate` 和 `python -m airflow dags list-import-errors -l -o json`
 - `tagging`: `source` 变量名、US source 列表、受管 tags
 - `rules`: DAG 命名规则、queue 规则，以及 DAG 顶层变量规则
 - 部署脚本也支持 `--debug`，会额外打印校验阶段执行的命令

@@ -899,22 +899,30 @@ class IntegrationTests(unittest.TestCase):
             archive_path = self._build_demo_archive(temp_path / "demo.zip")
             config_path = self._write_config(temp_path, enable_rules=True)
 
-            dry_run_exit = main([
-                "--archive-file",
-                str(archive_path),
-                "--config",
-                str(config_path),
-                "--dry-run",
-            ])
+            with mock.patch(
+                "deploy_steps.airflow_cli.execute_airflow_validation",
+                return_value=_successful_airflow_cli_result(),
+            ):
+                dry_run_exit = main([
+                    "--archive-file",
+                    str(archive_path),
+                    "--config",
+                    str(config_path),
+                    "--dry-run",
+                ])
             self.assertEqual(dry_run_exit, 0)
             self.assertFalse(any((temp_path / "landing").glob("**/*")))
 
-            result = run([
-                "--archive-file",
-                str(archive_path),
-                "--config",
-                str(config_path),
-            ])
+            with mock.patch(
+                "deploy_steps.airflow_cli.execute_airflow_validation",
+                return_value=_successful_airflow_cli_result(),
+            ):
+                result = run([
+                    "--archive-file",
+                    str(archive_path),
+                    "--config",
+                    str(config_path),
+                ])
             live_file = result["publish_result"].live_target_dir / "example_dag.py"
             self.assertTrue(live_file.is_file())
             deployed_text = live_file.read_text(encoding="utf-8")
@@ -933,23 +941,70 @@ class IntegrationTests(unittest.TestCase):
 
             stdout = io.StringIO()
             stderr = io.StringIO()
-            with mock.patch("sys.stdout", new=stdout), mock.patch("sys.stderr", new=stderr):
-                exit_code = main(
-                    [
-                        "--archive-file",
-                        str(archive_path),
-                        "--config",
-                        str(config_path),
-                        "--dry-run",
-                        "--debug",
-                    ]
-                )
+            with mock.patch(
+                "deploy_steps.airflow_cli.execute_airflow_validation",
+                return_value=_successful_airflow_cli_result(),
+            ):
+                with mock.patch("sys.stdout", new=stdout), mock.patch("sys.stderr", new=stderr):
+                    exit_code = main(
+                        [
+                            "--archive-file",
+                            str(archive_path),
+                            "--config",
+                            str(config_path),
+                            "--dry-run",
+                            "--debug",
+                        ]
+                    )
 
             self.assertEqual(exit_code, 0)
             self.assertIn("Python files detected", stdout.getvalue())
+            self.assertIn("Run Airflow CLI Validation", stdout.getvalue())
+            self.assertIn("Python files staged for Airflow CLI validation", stdout.getvalue())
             self.assertIn("Airflow DAG files detected", stdout.getvalue())
             self.assertIn("Execution Logs", stdout.getvalue())
             self.assertIn("STDOUT log:", stdout.getvalue())
+
+    def test_deploy_pipeline_reports_airflow_cli_import_errors(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            archive_path = self._build_demo_archive(temp_path / "demo.zip")
+            config_path = self._write_config(temp_path, enable_rules=True)
+
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+
+            with mock.patch(
+                "deploy_steps.airflow_cli.execute_airflow_validation",
+                return_value=subprocess.CompletedProcess(
+                    args=[sys.executable, "-m", "airflow", "dags", "list-import-errors", "-l", "-o", "json"],
+                    returncode=1,
+                    stdout=json.dumps(
+                        [
+                            {
+                                "filepath": "/tmp/example_dag.py",
+                                "error": "Broken DAG: import failed",
+                            }
+                        ]
+                    ),
+                    stderr="",
+                ),
+            ):
+                with mock.patch("sys.stdout", new=stdout), mock.patch("sys.stderr", new=stderr):
+                    exit_code = main(
+                        [
+                            "--archive-file",
+                            str(archive_path),
+                            "--config",
+                            str(config_path),
+                            "--dry-run",
+                        ]
+                    )
+
+            self.assertEqual(exit_code, 1)
+            self.assertIn("Airflow reported DAG import errors", stderr.getvalue())
+            self.assertIn("Broken DAG: import failed", stderr.getvalue())
+            self.assertIn("Run Airflow CLI Validation", stdout.getvalue())
 
     def test_publish_rolls_back_on_rename_failure(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1153,6 +1208,15 @@ def _runtime_logging_settings(temp_path):
     return RuntimeLoggingSettings(
         directory=(temp_path / "logs").resolve(),
         retention_days=14,
+    )
+
+
+def _successful_airflow_cli_result():
+    return subprocess.CompletedProcess(
+        args=[sys.executable, "-m", "airflow", "dags", "list-import-errors", "-l", "-o", "json"],
+        returncode=0,
+        stdout="[]",
+        stderr="",
     )
 
 
