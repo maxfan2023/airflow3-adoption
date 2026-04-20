@@ -127,6 +127,8 @@ def _run_with_args(args, reporter=None):
     reporter.section("🧭", "Load Deployment Configuration")
     config = load_pipeline_config(args.config, args.working_root, environment=environment)
     debug_print(args.debug, "Using deployment config: {0}".format(config.config_path))
+    reporter.value("🌍", "Environment", environment)
+    reporter.value("🧾", "Config file", config.config_path)
     release_name = None
 
     credentials = {}
@@ -138,6 +140,7 @@ def _run_with_args(args, reporter=None):
             args.credentials_file,
             environment=environment,
         )
+        reporter.value("📄", "Credentials file", credentials_file)
         credentials = load_properties(credentials_file)
         username = credentials.get("NEXUS_USERNAME")
         password = credentials.get("NEXUS_PASSWORD")
@@ -173,6 +176,10 @@ def _run_with_args(args, reporter=None):
         checksum_mode=config.checksum.mode,
         sidecar_suffix=config.checksum.sidecar_suffix,
     )
+    reporter.value("🧭", "Artifact source", "{0}: {1}".format(artifact.source_kind, artifact.source_value))
+    if artifact.resolved_url:
+        reporter.value("🔗", "Resolved URL", artifact.resolved_url)
+    reporter.value("📦", "Staged archive", artifact.local_archive_path)
 
     release_name = build_release_name(
         artifact.local_archive_path.name,
@@ -187,6 +194,10 @@ def _run_with_args(args, reporter=None):
         expected_sha256=args.expected_sha256,
         sidecar_content=artifact.sidecar_content,
     )
+    reporter.value("🔐", "Checksum mode", checksum.mode)
+    reporter.value("🧮", "Actual SHA256", checksum.actual_sha256)
+    if checksum.expected_sha256:
+        reporter.value("📌", "Expected SHA256", checksum.expected_sha256)
 
     extractor = ArchiveExtractor(
         allowed_suffixes=config.archive.allowed_suffixes,
@@ -194,6 +205,7 @@ def _run_with_args(args, reporter=None):
     )
     reporter.section("📂", "Extract Archive")
     extracted_root = extractor.extract(artifact.local_archive_path, extract_dir)
+    reporter.value("📁", "Extracted package root", extracted_root)
 
     reporter.section("🐍", "Run Python Checks")
     python_files = discover_python_files(extracted_root)
