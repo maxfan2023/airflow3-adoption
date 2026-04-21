@@ -255,7 +255,7 @@ class NexusDagBundle(BaseDagBundle):
                 metadata = self._load_current_pointer()
         if not metadata:
             raise AirflowException("No cached DAG bundle is available for '{0}'.".format(self.bundle_name))
-        return str(Path(metadata["package_root"]).expanduser().resolve())
+        return Path(metadata["package_root"]).expanduser().resolve()
 
     def get_current_version(self):
         self.initialize()
