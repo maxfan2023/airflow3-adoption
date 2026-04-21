@@ -235,6 +235,44 @@ dag_bundle_config_list = [
 - `nexus_conn_id` 对应的 Airflow Connection 需要提供 Nexus 登录凭据；推荐把 `repository_url` 放在 connection extra 里
 - `versions/<version>.json` 解决 Airflow DagRun 回读历史版本时，如何从版本号定位到 Nexus 中具体 zip 的问题
 
+### 预热脚本默认值来源
+
+`prewarm_dag_bundle_cache.py` 默认会先读取 `deploy_pipeline.<environment>.json`：
+
+- `bundle.metadata_root_prefix`
+  用来拼出默认的 `latest.json` 路径
+- `bundle.cache_root`
+  用来决定本地缓存目录
+- `nexus.repository_url`
+  用来决定 Nexus 仓库根 URL
+
+例如默认会把：
+
+- `environment=dev`
+- `bundle-name=DAG_ID_RELEASE`
+- `bundle.metadata_root_prefix=com/hsbc/gdt/et/fctm/bundles`
+
+组合成：
+
+```text
+com/hsbc/gdt/et/fctm/bundles/dev/DAG_ID_RELEASE/latest.json
+```
+
+如果你要把 `bundles` 改成 `airflow_dag_bundle`，推荐直接修改：
+
+```json
+"bundle": {
+  "metadata_root_prefix": "com/hsbc/gdt/et/fctm/airflow_dag_bundle",
+  "cache_root": "/FCR_APP/abinitio/airflow/v3/dag_bundle_cache"
+}
+```
+
+只有在临时覆盖时，才建议使用命令行参数：
+
+- `--manifest-path`
+- `--cache-root`
+- `--repository-url`
+
 ## 旧部署脚本
 
 `scripts/dag_publish/deploy_dag_from_nexus.py` 仍然保留，但现在应视为管理员/排障工具，而不是正式发布链路。

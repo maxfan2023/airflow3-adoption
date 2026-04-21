@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Dict, List
 
 from common import (
+    DEFAULT_BUNDLE_PREFIX,
     build_default_pipeline_config_candidates,
     normalize_environment,
     parse_bool,
@@ -45,6 +46,12 @@ class ChecksumSettings:
 class LoggingSettings:
     directory: Path
     retention_days: int = 14
+
+
+@dataclass
+class BundleSettings:
+    metadata_root_prefix: str
+    cache_root: Path
 
 
 @dataclass
@@ -101,6 +108,7 @@ class PipelineConfig:
     archive: ArchiveSettings
     checksum: ChecksumSettings
     logging: LoggingSettings
+    bundle: BundleSettings
     airflow_cli: AirflowCliSettings
     imports: ImportSettings
     tagging: TaggingSettings
@@ -141,6 +149,7 @@ def load_pipeline_config(explicit_path=None, working_root_override=None, environ
     archive_raw = raw.get("archive") or {}
     checksum_raw = raw.get("checksum") or {}
     logging_raw = raw.get("logging") or {}
+    bundle_raw = raw.get("bundle") or {}
     airflow_cli_raw = raw.get("airflow_cli") or {}
     imports_raw = raw.get("imports") or {}
     tagging_raw = raw.get("tagging") or {}
@@ -181,6 +190,15 @@ def load_pipeline_config(explicit_path=None, working_root_override=None, environ
                 base_dir,
             ),
             retention_days=int(logging_raw.get("retention_days", 14)),
+        ),
+        bundle=BundleSettings(
+            metadata_root_prefix=str(
+                bundle_raw.get("metadata_root_prefix", DEFAULT_BUNDLE_PREFIX)
+            ).strip(),
+            cache_root=resolve_path(
+                bundle_raw.get("cache_root", "/FCR_APP/abinitio/airflow/v3/dag_bundle_cache"),
+                base_dir,
+            ),
         ),
         airflow_cli=_build_airflow_cli_settings(
             airflow_cli_raw=airflow_cli_raw,
@@ -285,6 +303,8 @@ def _validate_config(config):
         raise DeploymentError("tagging.global_tag must be part of tagging.managed_tags.")
     if config.logging.retention_days <= 0:
         raise DeploymentError("logging.retention_days must be greater than zero.")
+    if not str(config.bundle.metadata_root_prefix or "").strip():
+        raise DeploymentError("bundle.metadata_root_prefix cannot be empty.")
     if "AIRFLOW__CORE__DAGS_FOLDER" not in config.airflow_cli.env:
         raise DeploymentError("airflow_cli.env must include AIRFLOW__CORE__DAGS_FOLDER.")
     if "AIRFLOW__CORE__LOAD_EXAMPLES" not in config.airflow_cli.env:
