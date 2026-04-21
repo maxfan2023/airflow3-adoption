@@ -23,8 +23,19 @@ from deploy_steps import (
     discover_python_files,
     load_pipeline_config,
     strip_archive_suffix,
-    validate_package_with_airflow_cli,
 )
+
+try:
+    from deploy_steps import validate_package_with_airflow_cli
+except ImportError:
+    try:
+        from deploy_steps.airflow_cli import validate_package_with_airflow_cli
+    except ImportError as exc:
+        raise ImportError(
+            "Unable to load Airflow CLI validation helpers. Please sync "
+            "scripts/dag_publish/deploy_steps/__init__.py and "
+            "scripts/dag_publish/deploy_steps/airflow_cli.py to the latest main branch."
+        ) from exc
 
 
 def parse_args(argv=None):
