@@ -144,6 +144,10 @@ def parse_args(argv=None) -> argparse.Namespace:
         help="Override the latest.json path inside the Nexus repository for this bundle.",
     )
     parser.add_argument(
+        "--bundle-root-prefix",
+        help="Override the Nexus repository root prefix for bundle metadata paths, for example com/.../airflow_dag_bundle.",
+    )
+    parser.add_argument(
         "--change-ticket",
         help="Release change ticket. Defaults to the first CHG* token found in the upload path prefix.",
     )
@@ -1159,27 +1163,38 @@ def _run_with_args(args, reporter=None):
         raise ValueError(
             "--change-ticket was not provided and no CHG* token could be inferred from the upload path."
         )
+    bundle_root_prefix = (
+        str(args.bundle_root_prefix).strip()
+        if args.bundle_root_prefix
+        else str(
+            properties.get("NEXUS_BUNDLE_ROOT_PREFIX")
+            or DEFAULT_BUNDLE_MANIFEST_ROOT
+        ).strip()
+    )
     bundle_manifest_path = (
         str(args.bundle_manifest_path).strip()
         if args.bundle_manifest_path
-        else build_latest_manifest_path(environment, bundle_name, root_prefix=DEFAULT_BUNDLE_MANIFEST_ROOT)
+        else build_latest_manifest_path(environment, bundle_name, root_prefix=bundle_root_prefix)
     )
     release_record_path = build_release_record_path(
         environment,
         bundle_name,
         released_at,
-        root_prefix=DEFAULT_BUNDLE_MANIFEST_ROOT,
+        root_prefix=bundle_root_prefix,
     )
     version_record_path = build_version_record_path(
         environment,
         bundle_name,
         version,
-        root_prefix=DEFAULT_BUNDLE_MANIFEST_ROOT,
+        root_prefix=bundle_root_prefix,
     )
+    bundle_manifest_url = build_upload_url(repository_url, bundle_manifest_path)
+    version_record_url = build_upload_url(repository_url, version_record_path)
+    release_record_url = build_upload_url(repository_url, release_record_path)
     previous_version = ""
     if not args.dry_run:
         existing_manifest = fetch_optional_json(
-            build_upload_url(repository_url, bundle_manifest_path),
+            bundle_manifest_url,
             username=username,
             password=password,
             timeout=timeout,
@@ -1230,9 +1245,10 @@ def _run_with_args(args, reporter=None):
     reporter.value("🧾", "Change ticket", change_ticket)
     reporter.value("🧬", "Source commit", source_commit)
     reporter.value("👤", "Released by", released_by)
-    reporter.value("📍", "Latest manifest path", bundle_manifest_path)
-    reporter.value("🗃️", "Version record path", version_record_path)
-    reporter.value("🗂️", "Release record path", release_record_path)
+    reporter.value("🧱", "Bundle metadata root", bundle_root_prefix)
+    reporter.value("📍", "Latest manifest URL", bundle_manifest_url)
+    reporter.value("🗃️", "Version record URL", version_record_url)
+    reporter.value("🗂️", "Release record URL", release_record_url)
     reporter.value("🔗", "Artifact upload target", upload_url)
     debug_print(args.debug, "Resolved upload URL: {0}".format(upload_url))
 
@@ -1288,9 +1304,13 @@ def _run_with_args(args, reporter=None):
         "upload_url": upload_url,
         "upload_path": upload_path,
         "bundle_name": bundle_name,
+        "bundle_root_prefix": bundle_root_prefix,
         "bundle_manifest_path": bundle_manifest_path,
+        "bundle_manifest_url": bundle_manifest_url,
         "release_record_path": release_record_path,
+        "release_record_url": release_record_url,
         "version_record_path": version_record_path,
+        "version_record_url": version_record_url,
         "released_at": released_at,
         "released_by": released_by,
         "change_ticket": change_ticket,
@@ -1329,9 +1349,10 @@ def main(argv=None):
             reporter.value("🧮", "SHA256", result["archive_sha256"])
             reporter.value("🔗", "Artifact upload target", result["upload_url"])
             reporter.value("📦", "Bundle name", result["bundle_name"])
-            reporter.value("📍", "Latest manifest path", result["bundle_manifest_path"])
-            reporter.value("🗃️", "Version record path", result["version_record_path"])
-            reporter.value("🗂️", "Release record path", result["release_record_path"])
+            reporter.value("🧱", "Bundle metadata root", result["bundle_root_prefix"])
+            reporter.value("📍", "Latest manifest URL", result["bundle_manifest_url"])
+            reporter.value("🗃️", "Version record URL", result["version_record_url"])
+            reporter.value("🗂️", "Release record URL", result["release_record_url"])
             if result["previous_version"]:
                 reporter.value("⏮️", "Previous version", result["previous_version"])
 

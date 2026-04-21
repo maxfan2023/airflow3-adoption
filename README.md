@@ -55,6 +55,7 @@ NEXUS_INSECURE=false
   `com/hsbc/gdt/et/fctm/1646753/CHG123456`
 - 如果将来需要覆盖默认仓库地址，可以在凭据文件里增加 `NEXUS_REPOSITORY_URL`
 - 如果将来需要覆盖默认路径前缀，可以在凭据文件里增加 `NEXUS_PATH_PREFIX`
+- 如果将来需要覆盖 bundle 元数据根路径，可以在凭据文件里增加 `NEXUS_BUNDLE_ROOT_PREFIX`
 - 如果公司环境更适合拆开配置，也可以改用 `NEXUS_BASE_URL` + `NEXUS_REPOSITORY`
 - 实际凭据文件已被 `.gitignore` 忽略，不会被提交
 - 脚本只使用 Python 标准库，不需要额外安装第三方依赖包
@@ -69,6 +70,9 @@ NEXUS_INSECURE=false
 - Airflow CLI 校验使用的临时目录和环境变量由 `deploy_pipeline.<environment>.json` 里的 `airflow_cli.temp_root` 与 `airflow_cli.env` 控制，不再固定写死到系统 `/tmp`
 - 新增的 bundle 元数据默认写到：
   `com/hsbc/gdt/et/fctm/bundles/<environment>/<bundle_name>/`
+- 如果你想把 `bundles` 改成别的目录名，例如 `airflow_dag_bundle`，可以：
+  在凭据文件里设置 `NEXUS_BUNDLE_ROOT_PREFIX=com/hsbc/gdt/et/fctm/airflow_dag_bundle`
+  或者在命令行显式传 `--bundle-root-prefix com/hsbc/gdt/et/fctm/airflow_dag_bundle`
 - 其中：
   `latest.json` 表示当前环境当前 bundle 的生效版本
   `versions/<version>.json` 用于 Airflow 按版本回读 bundle
