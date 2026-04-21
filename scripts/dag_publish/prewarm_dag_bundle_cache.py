@@ -18,11 +18,11 @@ from common import (
     resolve_credentials_file,
     load_properties,
 )
+from deploy_steps import load_pipeline_config
 from my_company.airflow_bundles.nexus import NexusArtifactClient, prewarm_bundle_cache
 
 
 DEFAULT_NEXUS_REPOSITORY_URL = "https://nexus302.systems.uk.hsbc:8081/nexus/repository/raw-alm-uat_n3p"
-DEFAULT_CACHE_ROOT = "/FCR_APP/abinitio/airflow/v3/dag_bundle_cache"
 
 
 def parse_args(argv=None):
@@ -32,10 +32,11 @@ def parse_args(argv=None):
     parser.add_argument("--environment", choices=("dev", "uat", "prod"), default="dev")
     parser.add_argument("--bundle-name", required=True)
     parser.add_argument("--version", help="Optional bundle version. Defaults to latest.json.")
+    parser.add_argument("--config", help="Path to the deployment pipeline JSON config file.")
     parser.add_argument("--manifest-path", help="Override the latest manifest path in Nexus.")
     parser.add_argument("--credentials-file", help="Override the environment-specific Nexus credentials file.")
     parser.add_argument("--repository-url", help="Override the Nexus repository root URL.")
-    parser.add_argument("--cache-root", default=DEFAULT_CACHE_ROOT)
+    parser.add_argument("--cache-root", help="Override the local cache root path.")
     parser.add_argument("--debug", action="store_true")
     return parser.parse_args(argv)
 
@@ -49,23 +50,30 @@ def _run_with_args(args, reporter=None):
     reporter = reporter or StepReporter(enabled=False)
     environment = normalize_environment(args.environment)
     reporter.section("🧭", "Resolve Bundle Prewarm Inputs")
+    config = load_pipeline_config(explicit_path=args.config, environment=environment)
     credentials_file = resolve_credentials_file(args.credentials_file, environment=environment)
     properties = load_properties(credentials_file)
     repository_url = str(
         args.repository_url
         or properties.get("NEXUS_REPOSITORY_URL")
+        or config.nexus.repository_url
         or DEFAULT_NEXUS_REPOSITORY_URL
     ).rstrip("/")
     username = properties.get("NEXUS_USERNAME")
     password = properties.get("NEXUS_PASSWORD")
     if not username or not password:
         raise ValueError("NEXUS_USERNAME and NEXUS_PASSWORD are required for bundle prewarm.")
-    verify_tls = not parse_bool(properties.get("NEXUS_INSECURE"), default=False)
-    timeout_seconds = int(properties.get("NEXUS_TIMEOUT_SECONDS", 60))
-    manifest_path = args.manifest_path or build_latest_manifest_path(environment, args.bundle_name)
-    cache_root = Path(args.cache_root).expanduser().resolve()
+    verify_tls = not parse_bool(properties.get("NEXUS_INSECURE"), default=(not config.nexus.verify_tls))
+    timeout_seconds = int(properties.get("NEXUS_TIMEOUT_SECONDS", config.nexus.timeout_seconds))
+    manifest_path = args.manifest_path or build_latest_manifest_path(
+        environment,
+        args.bundle_name,
+        root_prefix=config.bundle.metadata_root_prefix,
+    )
+    cache_root = Path(args.cache_root or config.bundle.cache_root).expanduser().resolve()
     reporter.value("🌍", "Environment", environment)
     reporter.value("📦", "Bundle name", args.bundle_name)
+    reporter.value("🧾", "Config file", config.config_path)
     reporter.value("🔐", "Credentials file", credentials_file)
     reporter.value("📍", "Latest manifest path", manifest_path)
     reporter.value("🗄️", "Cache root", cache_root)
@@ -80,7 +88,12 @@ def _run_with_args(args, reporter=None):
     )
     if args.version:
         selected_manifest = client.read_manifest(
-            build_version_record_path(environment, args.bundle_name, args.version)
+            build_version_record_path(
+                environment,
+                args.bundle_name,
+                args.version,
+                root_prefix=config.bundle.metadata_root_prefix,
+            )
         )
     else:
         selected_manifest = client.read_manifest(manifest_path)
@@ -108,13 +121,17 @@ def _run_with_args(args, reporter=None):
         "bundle_name": args.bundle_name,
         "version": metadata["version"],
         "package_root": metadata["package_root"],
+        "config_path": config.config_path,
         "manifest_path": manifest_path,
     }
 
 
 def main(argv=None):
     args = parse_args(argv)
-    logging_settings = resolve_runtime_logging_settings(environment=args.environment)
+    logging_settings = resolve_runtime_logging_settings(
+        explicit_config_path=args.config,
+        environment=args.environment,
+    )
     session = ScriptOutputSession(
         script_name="prewarm_dag_bundle_cache",
         log_directory=logging_settings.directory,
@@ -129,6 +146,7 @@ def main(argv=None):
             reporter.section("📋", "Bundle Prewarm Summary")
             reporter.value("🌍", "Environment", result["environment"])
             reporter.value("📦", "Bundle name", result["bundle_name"])
+            reporter.value("🧾", "Config file", result["config_path"])
             reporter.value("🏷️", "Version", result["version"])
             reporter.value("📁", "Cached bundle path", result["package_root"])
             reporter.value("📍", "Latest manifest path", result["manifest_path"])

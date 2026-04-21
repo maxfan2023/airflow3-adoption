@@ -26,6 +26,10 @@
     "directory": "build/dag_deploy/logs",
     "retention_days": 14
   },
+  "bundle": {
+    "metadata_root_prefix": "com/hsbc/gdt/et/fctm/bundles",
+    "cache_root": "/FCR_APP/abinitio/airflow/v3/dag_bundle_cache"
+  },
   "airflow_cli": {
     "temp_root": "build/dag_deploy/airflow_cli",
     "env": {
