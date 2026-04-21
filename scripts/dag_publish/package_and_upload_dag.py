@@ -50,7 +50,13 @@ import zipfile
 from cli_support import ScriptOutputSession, StepReporter, resolve_runtime_logging_settings
 from common import (
     build_default_credentials_candidates,
+    build_latest_manifest_path,
+    build_release_record_path,
+    build_version_record_path,
+    infer_change_ticket,
     normalize_environment,
+    resolve_git_commit,
+    utc_now_text,
 )
 from deploy_steps import (
     DeploymentError,
@@ -68,6 +74,7 @@ DEFAULT_NEXUS_REPOSITORY_URL = (
     "https://nexus302.systems.uk.hsbc:8081/nexus/repository/raw-alm-uat_n3p"
 )
 DEFAULT_PATH_PREFIX = "com/hsbc/gdt/et/fctm/1646753/CHG123456"
+DEFAULT_BUNDLE_MANIFEST_ROOT = "com/hsbc/gdt/et/fctm/bundles"
 DEFAULT_TIMEOUT_SECONDS = 60
 DEFAULT_ARCHIVE_SEPARATOR = "."
 SKIP_NAMES = {"__pycache__", ".DS_Store", ".git", ".idea"}
@@ -88,6 +95,10 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument(
         "--artifact-id",
         help="Artifact id used in the zip filename and default Nexus object name.",
+    )
+    parser.add_argument(
+        "--bundle-name",
+        help="Logical DAG bundle name used for Nexus bundle manifests. Defaults to --artifact-id.",
     )
     parser.add_argument(
         "--version",
@@ -127,6 +138,27 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument(
         "--upload-path",
         help="Custom path inside the Nexus repository. Defaults to <path-prefix>/<artifact-id>.<version>.zip.",
+    )
+    parser.add_argument(
+        "--bundle-manifest-path",
+        help="Override the latest.json path inside the Nexus repository for this bundle.",
+    )
+    parser.add_argument(
+        "--change-ticket",
+        help="Release change ticket. Defaults to the first CHG* token found in the upload path prefix.",
+    )
+    parser.add_argument(
+        "--source-commit",
+        help="Source Git commit SHA. Defaults to the current repository HEAD.",
+    )
+    parser.add_argument(
+        "--release-notes",
+        default="",
+        help="Short release notes stored in the bundle release record.",
+    )
+    parser.add_argument(
+        "--released-by",
+        help="Release operator name. Defaults to $USER or $LOGNAME.",
     )
     parser.add_argument(
         "--output-dir",
@@ -755,6 +787,11 @@ def build_archive_name(artifact_id, version):
     return artifact_id + DEFAULT_ARCHIVE_SEPARATOR + version + ".zip"
 
 
+def build_sha256_sidecar_text(archive_name, archive_sha256):
+    """Render a standard sha256 sidecar payload."""
+    return "{0}  {1}\n".format(archive_sha256, archive_name)
+
+
 def create_archive(
     sources,
     output_dir,
@@ -774,6 +811,15 @@ def create_archive(
             sha256.update(chunk)
 
     return archive_path, sha256.hexdigest()
+
+
+def write_sha256_sidecar(archive_path, archive_sha256):
+    """Write a .sha256 file next to the generated archive."""
+    archive_path = Path(archive_path).expanduser().resolve()
+    sidecar_path = Path(str(archive_path) + ".sha256")
+    sidecar_text = build_sha256_sidecar_text(archive_path.name, archive_sha256)
+    sidecar_path.write_text(sidecar_text, encoding="utf-8")
+    return sidecar_path
 
 
 def normalize_path_prefix(path_prefix):
@@ -797,6 +843,65 @@ def build_default_upload_path(path_prefix, archive_name):
     return "/".join(parts)
 
 
+def build_version_record_payload(
+    environment,
+    bundle_name,
+    version,
+    artifact_path,
+    archive_sha256,
+    released_at,
+    release_record_path,
+    released_by,
+    change_ticket,
+    source_commit,
+    notes,
+    previous_version,
+):
+    """Build the immutable version record for one bundle version."""
+    return {
+        "environment": environment,
+        "bundle_name": bundle_name,
+        "version": version,
+        "artifact_path": artifact_path,
+        "sha256": archive_sha256,
+        "released_at": released_at,
+        "released_by": released_by,
+        "change_ticket": change_ticket,
+        "source_commit": source_commit,
+        "previous_version": previous_version,
+        "notes": notes,
+        "release_record_path": release_record_path,
+    }
+
+
+def build_release_record_payload(version_record_path, **kwargs):
+    """Build the immutable audit record for one release event."""
+    payload = build_version_record_payload(**kwargs)
+    payload["version_record_path"] = version_record_path
+    return payload
+
+
+def build_latest_manifest_payload(
+    bundle_name,
+    version,
+    artifact_path,
+    archive_sha256,
+    released_at,
+    release_record_path,
+    version_record_path,
+):
+    """Build the stable latest.json pointer payload."""
+    return {
+        "bundle_name": bundle_name,
+        "version": version,
+        "artifact_path": artifact_path,
+        "sha256": archive_sha256,
+        "released_at": released_at,
+        "release_record_path": release_record_path,
+        "version_record_path": version_record_path,
+    }
+
+
 def resolve_repository_url(args, properties):
     """Resolve the target Nexus repository URL from CLI first, then config file."""
     if args.repository_url:
@@ -816,29 +921,37 @@ def build_upload_url(repository_url, upload_path):
     return f"{repository_url.rstrip('/')}/{parse.quote(upload_path.lstrip('/'), safe='/')}"
 
 
-def upload_archive(
+def _build_authorized_request(target_url, username, password, payload=None, method="GET", content_type=None):
+    headers = {}
+    if username and password:
+        auth = base64.b64encode(f"{username}:{password}".encode("utf-8")).decode("ascii")
+        headers["Authorization"] = f"Basic {auth}"
+    if content_type:
+        headers["Content-Type"] = content_type
+    if payload is not None:
+        headers["Content-Length"] = str(len(payload))
+    return request.Request(target_url, data=payload, method=method, headers=headers)
+
+
+def upload_payload(
     upload_url,
-    archive_path,
+    payload,
     username,
     password,
     timeout,
     insecure,
+    content_type,
 ):
-    """Upload the generated zip with a simple HTTP PUT request.
-
-    This matches the common upload pattern for Nexus Raw repositories.
-    """
+    """Upload arbitrary bytes to Nexus Raw with a simple HTTP PUT request."""
     auth = base64.b64encode(f"{username}:{password}".encode("utf-8")).decode("ascii")
-    payload = archive_path.read_bytes()
-    http_request = request.Request(
+    del auth
+    http_request = _build_authorized_request(
         upload_url,
-        data=payload,
+        username=username,
+        password=password,
+        payload=payload,
         method="PUT",
-        headers={
-            "Authorization": f"Basic {auth}",
-            "Content-Type": "application/zip",
-            "Content-Length": str(len(payload)),
-        },
+        content_type=content_type,
     )
 
     # Some internal Nexus environments use a private CA. Keep strict TLS by
@@ -856,6 +969,78 @@ def upload_archive(
         raise RuntimeError(message) from exc
     except error.URLError as exc:
         raise RuntimeError(f"Unable to reach Nexus: {exc.reason}") from exc
+
+
+def upload_archive(
+    upload_url,
+    archive_path,
+    username,
+    password,
+    timeout,
+    insecure,
+):
+    """Upload the generated zip with a simple HTTP PUT request."""
+    upload_payload(
+        upload_url=upload_url,
+        payload=Path(archive_path).expanduser().resolve().read_bytes(),
+        username=username,
+        password=password,
+        timeout=timeout,
+        insecure=insecure,
+        content_type="application/zip",
+    )
+
+
+def upload_text(
+    upload_url,
+    text,
+    username,
+    password,
+    timeout,
+    insecure,
+    content_type="application/json",
+):
+    """Upload UTF-8 text content to Nexus Raw."""
+    upload_payload(
+        upload_url=upload_url,
+        payload=str(text).encode("utf-8"),
+        username=username,
+        password=password,
+        timeout=timeout,
+        insecure=insecure,
+        content_type=content_type,
+    )
+
+
+def fetch_optional_json(target_url, username, password, timeout, insecure):
+    """Fetch JSON metadata from Nexus Raw, returning None when the object does not exist."""
+    ssl_context = ssl._create_unverified_context() if insecure else None
+    http_request = _build_authorized_request(
+        target_url,
+        username=username,
+        password=password,
+        payload=None,
+        method="GET",
+        content_type=None,
+    )
+    try:
+        with request.urlopen(http_request, timeout=timeout, context=ssl_context) as response:
+            body = response.read().decode("utf-8", errors="replace")
+    except error.HTTPError as exc:
+        if exc.code == 404:
+            return None
+        error_body = exc.read().decode("utf-8", errors="replace").strip()
+        message = f"Unable to read metadata from Nexus: HTTP {exc.code}"
+        if error_body:
+            message = f"{message}: {error_body}"
+        raise RuntimeError(message) from exc
+    except error.URLError as exc:
+        raise RuntimeError(f"Unable to reach Nexus: {exc.reason}") from exc
+
+    try:
+        return json.loads(body)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"Metadata at {target_url} is not valid JSON.") from exc
 
 
 def _run_with_args(args, reporter=None):
@@ -927,6 +1112,9 @@ def _run_with_args(args, reporter=None):
         reporter.message("⏭️", "Airflow CLI validation was skipped because no syntax-valid Python files were available.")
 
     artifact_id = derive_artifact_id(sources, args.artifact_id)
+    bundle_name = str(args.bundle_name or artifact_id).strip()
+    if not bundle_name:
+        raise ValueError("--bundle-name cannot be empty.")
     version = args.version.strip()
     if not version:
         raise ValueError("--version cannot be empty.")
@@ -945,32 +1133,169 @@ def _run_with_args(args, reporter=None):
     )
     timeout = args.timeout or int(properties.get("NEXUS_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS))
     insecure = args.insecure or parse_bool(properties.get("NEXUS_INSECURE"), default=False)
+    released_at = utc_now_text()
+    source_commit = resolve_git_commit(explicit_value=args.source_commit, cwd=REPO_ROOT)
+    if not source_commit:
+        raise ValueError(
+            "--source-commit was not provided and the current Git HEAD could not be resolved."
+        )
+    released_by = (
+        str(args.released_by or os.environ.get("USER") or os.environ.get("LOGNAME") or "unknown").strip()
+    )
 
     reporter.section("📦", "Create Archive")
     archive_name = build_archive_name(artifact_id, version)
     output_dir = Path(args.output_dir).expanduser().resolve()
     debug_print(args.debug, "Creating archive {0} in {1}".format(archive_name, output_dir))
     archive_path, archive_sha256 = create_archive(sources, output_dir, archive_name)
+    archive_sidecar_path = write_sha256_sidecar(archive_path, archive_sha256)
     reporter.message("✅", "Archive build completed.")
 
-    reporter.section("☁️", "Prepare Nexus Upload")
+    reporter.section("🧾", "Prepare Bundle Release Metadata")
     upload_path = args.upload_path or build_default_upload_path(path_prefix, archive_name)
     upload_url = build_upload_url(repository_url, upload_path)
+    change_ticket = args.change_ticket or infer_change_ticket(path_prefix, upload_path)
+    if not change_ticket:
+        raise ValueError(
+            "--change-ticket was not provided and no CHG* token could be inferred from the upload path."
+        )
+    bundle_manifest_path = (
+        str(args.bundle_manifest_path).strip()
+        if args.bundle_manifest_path
+        else build_latest_manifest_path(environment, bundle_name, root_prefix=DEFAULT_BUNDLE_MANIFEST_ROOT)
+    )
+    release_record_path = build_release_record_path(
+        environment,
+        bundle_name,
+        released_at,
+        root_prefix=DEFAULT_BUNDLE_MANIFEST_ROOT,
+    )
+    version_record_path = build_version_record_path(
+        environment,
+        bundle_name,
+        version,
+        root_prefix=DEFAULT_BUNDLE_MANIFEST_ROOT,
+    )
+    previous_version = ""
+    if not args.dry_run:
+        existing_manifest = fetch_optional_json(
+            build_upload_url(repository_url, bundle_manifest_path),
+            username=username,
+            password=password,
+            timeout=timeout,
+            insecure=insecure,
+        )
+        if isinstance(existing_manifest, dict):
+            previous_version = str(existing_manifest.get("version") or "").strip()
+
+    version_record_payload = build_version_record_payload(
+        environment=environment,
+        bundle_name=bundle_name,
+        version=version,
+        artifact_path=upload_path,
+        archive_sha256=archive_sha256,
+        released_at=released_at,
+        release_record_path=release_record_path,
+        released_by=released_by,
+        change_ticket=change_ticket,
+        source_commit=source_commit,
+        notes=str(args.release_notes or ""),
+        previous_version=previous_version,
+    )
+    release_record_payload = build_release_record_payload(
+        version_record_path=version_record_path,
+        environment=environment,
+        bundle_name=bundle_name,
+        version=version,
+        artifact_path=upload_path,
+        archive_sha256=archive_sha256,
+        released_at=released_at,
+        release_record_path=release_record_path,
+        released_by=released_by,
+        change_ticket=change_ticket,
+        source_commit=source_commit,
+        notes=str(args.release_notes or ""),
+        previous_version=previous_version,
+    )
+    latest_manifest_payload = build_latest_manifest_payload(
+        bundle_name=bundle_name,
+        version=version,
+        artifact_path=upload_path,
+        archive_sha256=archive_sha256,
+        released_at=released_at,
+        release_record_path=release_record_path,
+        version_record_path=version_record_path,
+    )
+    reporter.value("📦", "Bundle name", bundle_name)
+    reporter.value("🧾", "Change ticket", change_ticket)
+    reporter.value("🧬", "Source commit", source_commit)
+    reporter.value("👤", "Released by", released_by)
+    reporter.value("📍", "Latest manifest path", bundle_manifest_path)
+    reporter.value("🗃️", "Version record path", version_record_path)
+    reporter.value("🗂️", "Release record path", release_record_path)
+    reporter.value("🔗", "Artifact upload target", upload_url)
     debug_print(args.debug, "Resolved upload URL: {0}".format(upload_url))
 
     if args.dry_run:
         debug_print(args.debug, "Dry-run enabled; upload step skipped.")
     else:
-        reporter.section("🚀", "Upload Archive To Nexus")
-        debug_print(args.debug, "Uploading archive to Nexus.")
+        reporter.section("🚀", "Upload Bundle Release To Nexus")
+        debug_print(args.debug, "Uploading archive, checksum, version record, release record, and latest manifest to Nexus.")
         upload_archive(upload_url, archive_path, username, password, timeout, insecure)
+        upload_text(
+            build_upload_url(repository_url, upload_path + ".sha256"),
+            archive_sidecar_path.read_text(encoding="utf-8"),
+            username=username,
+            password=password,
+            timeout=timeout,
+            insecure=insecure,
+            content_type="text/plain",
+        )
+        upload_text(
+            build_upload_url(repository_url, version_record_path),
+            json.dumps(version_record_payload, indent=2, sort_keys=True) + "\n",
+            username=username,
+            password=password,
+            timeout=timeout,
+            insecure=insecure,
+            content_type="application/json",
+        )
+        upload_text(
+            build_upload_url(repository_url, release_record_path),
+            json.dumps(release_record_payload, indent=2, sort_keys=True) + "\n",
+            username=username,
+            password=password,
+            timeout=timeout,
+            insecure=insecure,
+            content_type="application/json",
+        )
+        upload_text(
+            build_upload_url(repository_url, bundle_manifest_path),
+            json.dumps(latest_manifest_payload, indent=2, sort_keys=True) + "\n",
+            username=username,
+            password=password,
+            timeout=timeout,
+            insecure=insecure,
+            content_type="application/json",
+        )
 
     return {
         "archive_path": archive_path,
+        "archive_sidecar_path": archive_sidecar_path,
         "archive_sha256": archive_sha256,
         "environment": environment,
         "credentials_file": credentials_file,
         "upload_url": upload_url,
+        "upload_path": upload_path,
+        "bundle_name": bundle_name,
+        "bundle_manifest_path": bundle_manifest_path,
+        "release_record_path": release_record_path,
+        "version_record_path": version_record_path,
+        "released_at": released_at,
+        "released_by": released_by,
+        "change_ticket": change_ticket,
+        "source_commit": source_commit,
+        "previous_version": previous_version,
         "dry_run": args.dry_run,
         "uploaded": not args.dry_run,
     }
@@ -998,10 +1323,17 @@ def main(argv=None):
 
             reporter.section("📋", "Package Upload Summary")
             reporter.value("📦", "Archive created", result["archive_path"])
+            reporter.value("📄", "SHA256 sidecar", result["archive_sidecar_path"])
             reporter.value("🌍", "Environment", result["environment"])
             reporter.value("🔐", "Credentials file", result["credentials_file"])
             reporter.value("🧮", "SHA256", result["archive_sha256"])
-            reporter.value("🔗", "Upload target", result["upload_url"])
+            reporter.value("🔗", "Artifact upload target", result["upload_url"])
+            reporter.value("📦", "Bundle name", result["bundle_name"])
+            reporter.value("📍", "Latest manifest path", result["bundle_manifest_path"])
+            reporter.value("🗃️", "Version record path", result["version_record_path"])
+            reporter.value("🗂️", "Release record path", result["release_record_path"])
+            if result["previous_version"]:
+                reporter.value("⏮️", "Previous version", result["previous_version"])
 
             if result["dry_run"]:
                 reporter.message("🧪", "Dry run enabled. Upload skipped.")

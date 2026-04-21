@@ -20,6 +20,7 @@ This repository is intentionally minimal for the initial setup. We will add envi
 - 每次调用都会同时写一份标准输出日志和一份错误日志
 - 每次检查都会列出本轮检测到的 Python 文件或 Airflow DAG 文件
 - 运行结束时会在终端明确打印 stdout/stderr 日志文件路径
+- 上传成功后，脚本会同时把 zip、`.sha256`、版本记录、发布审计记录和 `latest.json` 一起写入 Nexus
 
 ### 凭据文件格式
 
@@ -66,6 +67,12 @@ NEXUS_INSECURE=false
 - 如果使用 `--debug`，脚本还会逐步输出执行命令和 staging 细节，方便在公司服务器上定位问题
 - 日志目录和保留天数由 `deploy_pipeline.<environment>.json` 里的 `logging.directory` 与 `logging.retention_days` 控制；脚本启动时会自动清理超过保留天数的旧日志
 - Airflow CLI 校验使用的临时目录和环境变量由 `deploy_pipeline.<environment>.json` 里的 `airflow_cli.temp_root` 与 `airflow_cli.env` 控制，不再固定写死到系统 `/tmp`
+- 新增的 bundle 元数据默认写到：
+  `com/hsbc/gdt/et/fctm/bundles/<environment>/<bundle_name>/`
+- 其中：
+  `latest.json` 表示当前环境当前 bundle 的生效版本
+  `versions/<version>.json` 用于 Airflow 按版本回读 bundle
+  `releases/<timestamp>.json` 用于审计“谁在什么时候发布了什么”
 
 ### 使用示例
 
@@ -145,6 +152,88 @@ python3 scripts/dag_publish/package_and_upload_dag.py \
   --version 1.0.0 \
   --dry-run
 ```
+
+如果要显式填写 bundle 审计信息，可以增加：
+
+```bash
+python3 scripts/dag_publish/package_and_upload_dag.py \
+  dags/customer_sync \
+  --environment prod \
+  --artifact-id customer-sync \
+  --bundle-name customer_sync \
+  --version 1.0.0 \
+  --change-ticket CHG123456 \
+  --source-commit abcdef123456 \
+  --released-by max.wang \
+  --release-notes "add new hub DAG"
+```
+
+## Nexus Dag Bundle 正式发布模式
+
+正式模式不再依赖外部脚本把 zip 解压到 Airflow `dags` 目录。
+
+新的推荐流程是：
+
+1. `package_and_upload_dag.py` 上传 versioned zip、`.sha256`、`versions/<version>.json`、`releases/<timestamp>.json` 和 `latest.json`
+2. 在目标环境节点执行 `prewarm_dag_bundle_cache.py`，把当前版本预热到本地缓存
+3. Airflow 通过自定义 `my_company.airflow_bundles.nexus.NexusDagBundle` 直接从 Nexus 读取 bundle 元数据，并在本地缓存中加载 DAG
+
+### 主要文件
+
+- 自定义 bundle：`my_company/airflow_bundles/nexus.py`
+- 预热脚本：`scripts/dag_publish/prewarm_dag_bundle_cache.py`
+
+### 预热示例
+
+按 `latest.json` 预热：
+
+```bash
+python3 scripts/dag_publish/prewarm_dag_bundle_cache.py \
+  --environment prod \
+  --bundle-name customer_sync
+```
+
+预热指定版本：
+
+```bash
+python3 scripts/dag_publish/prewarm_dag_bundle_cache.py \
+  --environment prod \
+  --bundle-name customer_sync \
+  --version 1.0.0
+```
+
+### Airflow 配置示例
+
+`airflow.cfg` 中的 `dag_bundle_config_list` 可以配置成：
+
+```ini
+[dag_processor]
+dag_bundle_config_list = [
+  {
+    "name": "customer_sync",
+    "classpath": "my_company.airflow_bundles.nexus.NexusDagBundle",
+    "kwargs": {
+      "bundle_name": "customer_sync",
+      "manifest_path": "com/hsbc/gdt/et/fctm/bundles/prod/customer_sync/latest.json",
+      "nexus_conn_id": "dag_bundle_nexus_prod",
+      "cache_root": "/FCR_APP/abinitio/airflow/v3/dag_bundle_cache",
+      "refresh_interval": 300,
+      "verify_tls": true
+    }
+  }
+]
+```
+
+说明：
+
+- 运行时会优先使用本地缓存的当前版本；如果 Nexus 临时不可用，但本地已有可用缓存，Airflow 会继续使用当前缓存，不会把 DAG 加载切坏
+- 新机器或缓存为空时，必须先执行预热脚本，不依赖 scheduler 第一次启动时临时拉取
+- `nexus_conn_id` 对应的 Airflow Connection 需要提供 Nexus 登录凭据；推荐把 `repository_url` 放在 connection extra 里
+- `versions/<version>.json` 解决 Airflow DagRun 回读历史版本时，如何从版本号定位到 Nexus 中具体 zip 的问题
+
+## 旧部署脚本
+
+`scripts/dag_publish/deploy_dag_from_nexus.py` 仍然保留，但现在应视为管理员/排障工具，而不是正式发布链路。
 
 ## DAG 从 Nexus 落地并发布到 Airflow dags
 
