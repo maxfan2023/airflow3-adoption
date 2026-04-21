@@ -114,8 +114,9 @@ class NexusDagBundleRuntimeTests(unittest.TestCase):
             )
             bundle._build_client = lambda: client  # type: ignore[method-assign]
             bundle.refresh()
-            cached_path = Path(bundle.path)
+            cached_path = bundle.path
             self.assertTrue(cached_path.is_dir())
+            self.assertIsInstance(cached_path, Path)
             self.assertEqual(bundle.get_current_version(), "1.0.0")
 
             outage_bundle = NexusDagBundle(
@@ -128,7 +129,7 @@ class NexusDagBundleRuntimeTests(unittest.TestCase):
             outage_bundle._build_client = lambda: _FailingClient()  # type: ignore[method-assign]
             outage_bundle.refresh()
             self.assertEqual(outage_bundle.get_current_version(), "1.0.0")
-            self.assertEqual(Path(outage_bundle.path), cached_path)
+            self.assertEqual(outage_bundle.path, cached_path)
 
     def test_refresh_without_cache_fails_when_nexus_is_unavailable(self):
         with tempfile.TemporaryDirectory() as temp_dir:
