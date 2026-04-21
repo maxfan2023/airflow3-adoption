@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Shared helpers for DAG publishing scripts."""
 
+from datetime import datetime, timezone
 from pathlib import Path
+import re
+import subprocess
 from typing import Dict
 
 
@@ -11,6 +14,8 @@ REPO_ROOT = SCRIPT_DIR.parents[1]
 SUPPORTED_ENVIRONMENTS = ("dev", "uat", "prod")
 DEFAULT_ENVIRONMENT = "dev"
 SURROUNDING_QUOTE_CHARS = {'"', "'", "“", "”", "‘", "’"}
+DEFAULT_BUNDLE_PREFIX = "com/hsbc/gdt/et/fctm/bundles"
+CHANGE_TICKET_PATTERN = re.compile(r"(CHG[0-9A-Za-z_-]+)")
 
 
 def load_properties(path):
@@ -99,6 +104,88 @@ def build_repository_object_url(repository_url, artifact_path):
         repository_url.rstrip("/"),
         parse.quote(str(artifact_path).lstrip("/"), safe="/"),
     )
+
+
+def normalize_repo_path(value):
+    """Normalize repository object paths to slash-separated form."""
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if "/" in text:
+        parts = text.split("/")
+    else:
+        parts = text.replace(".", "/").split("/")
+    return "/".join(part for part in parts if part)
+
+
+def build_bundle_base_path(environment, bundle_name, root_prefix=DEFAULT_BUNDLE_PREFIX):
+    """Build the Nexus repository path prefix for bundle metadata."""
+    environment = normalize_environment(environment)
+    normalized_root = normalize_repo_path(root_prefix)
+    bundle_name = str(bundle_name).strip()
+    if not bundle_name:
+        raise ValueError("bundle_name cannot be empty.")
+    return "/".join(part for part in (normalized_root, environment, bundle_name) if part)
+
+
+def build_latest_manifest_path(environment, bundle_name, root_prefix=DEFAULT_BUNDLE_PREFIX):
+    """Build the latest manifest path for a bundle."""
+    return "{0}/latest.json".format(build_bundle_base_path(environment, bundle_name, root_prefix=root_prefix))
+
+
+def build_release_record_path(environment, bundle_name, released_at, root_prefix=DEFAULT_BUNDLE_PREFIX):
+    """Build the immutable release record path for a bundle release."""
+    return "{0}/releases/{1}.json".format(
+        build_bundle_base_path(environment, bundle_name, root_prefix=root_prefix),
+        str(released_at).strip(),
+    )
+
+
+def build_version_record_path(environment, bundle_name, version, root_prefix=DEFAULT_BUNDLE_PREFIX):
+    """Build the immutable version lookup path for a bundle release."""
+    version = str(version or "").strip()
+    if not version:
+        raise ValueError("version cannot be empty.")
+    return "{0}/versions/{1}.json".format(
+        build_bundle_base_path(environment, bundle_name, root_prefix=root_prefix),
+        version,
+    )
+
+
+def infer_change_ticket(*values):
+    """Extract a change ticket like CHG123456 from one or more candidate strings."""
+    for value in values:
+        if not value:
+            continue
+        match = CHANGE_TICKET_PATTERN.search(str(value))
+        if match:
+            return match.group(1)
+    return ""
+
+
+def utc_now_text():
+    """Return the current UTC timestamp in an RFC3339-like format suitable for metadata."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def resolve_git_commit(explicit_value=None, cwd=None):
+    """Resolve a git commit SHA, preferring explicit input and then the current repository HEAD."""
+    if explicit_value:
+        return str(explicit_value).strip()
+    try:
+        process = subprocess.Popen(
+            ["git", "rev-parse", "HEAD"],
+            cwd=str(cwd or REPO_ROOT),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except OSError:
+        return ""
+    stdout, _stderr = process.communicate()
+    if process.returncode != 0:
+        return ""
+    return str(stdout).strip()
 
 
 def build_default_credentials_candidates(environment):
