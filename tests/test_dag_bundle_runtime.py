@@ -166,6 +166,79 @@ class NexusDagBundleRuntimeTests(unittest.TestCase):
             self.assertEqual(metadata["version"], "2.0.0")
             self.assertTrue(Path(metadata["package_root"]).is_dir())
 
+    def test_bundle_switches_to_new_latest_version_when_available(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            artifact_map_v1, manifests_v1 = _build_demo_bundle_artifacts(temp_path / "v1", version="1.0.0")
+            artifact_map_v2, manifests_v2 = _build_demo_bundle_artifacts(temp_path / "v2", version="1.0.1")
+
+            latest_path = "com/hsbc/gdt/et/fctm/bundles/dev/customer_sync/latest.json"
+            version_path_v1 = "com/hsbc/gdt/et/fctm/bundles/dev/customer_sync/versions/1.0.0.json"
+            version_path_v2 = "com/hsbc/gdt/et/fctm/bundles/dev/customer_sync/versions/1.0.1.json"
+
+            combined_manifests = {
+                latest_path: manifests_v2[latest_path],
+                version_path_v1: manifests_v1[version_path_v1],
+                version_path_v2: manifests_v2[version_path_v2],
+            }
+            combined_artifacts = {}
+            combined_artifacts.update(artifact_map_v1)
+            combined_artifacts.update(artifact_map_v2)
+
+            bundle = NexusDagBundle(
+                bundle_name="customer_sync",
+                manifest_path=latest_path,
+                nexus_conn_id="dag_bundle_nexus_dev",
+                cache_root=temp_path / "cache",
+                repository_url="https://example.invalid/repository/raw",
+            )
+            bundle._build_client = lambda: _FakeClient(temp_path, combined_manifests, combined_artifacts)  # type: ignore[method-assign]
+
+            initial_metadata = bundle._ensure_version_available("1.0.0")
+            bundle._write_current_pointer(initial_metadata)
+            self.assertEqual(initial_metadata["version"], "1.0.0")
+
+            resolved_path = bundle.path
+            self.assertTrue(str(resolved_path).endswith("/1.0.1/customer_sync"))
+            self.assertEqual(bundle.get_current_version(), "1.0.1")
+
+    def test_bundle_keeps_previous_version_when_new_latest_cannot_be_cached(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            artifact_map_v1, manifests_v1 = _build_demo_bundle_artifacts(temp_path / "v1", version="1.0.0")
+            artifact_map_v2, manifests_v2 = _build_demo_bundle_artifacts(temp_path / "v2", version="1.0.1")
+
+            latest_path = "com/hsbc/gdt/et/fctm/bundles/dev/customer_sync/latest.json"
+            version_path_v1 = "com/hsbc/gdt/et/fctm/bundles/dev/customer_sync/versions/1.0.0.json"
+
+            combined_manifests = {
+                latest_path: manifests_v2[latest_path],
+                version_path_v1: manifests_v1[version_path_v1],
+            }
+            combined_artifacts = {}
+            combined_artifacts.update(artifact_map_v1)
+            combined_artifacts.update(artifact_map_v2)
+            bad_artifact_path = manifests_v2[latest_path].artifact_path
+            combined_artifacts.pop(bad_artifact_path, None)
+            combined_artifacts.pop(bad_artifact_path + ".sha256", None)
+
+            bundle = NexusDagBundle(
+                bundle_name="customer_sync",
+                manifest_path=latest_path,
+                nexus_conn_id="dag_bundle_nexus_dev",
+                cache_root=temp_path / "cache",
+                repository_url="https://example.invalid/repository/raw",
+            )
+            bundle._build_client = lambda: _FakeClient(temp_path, combined_manifests, combined_artifacts)  # type: ignore[method-assign]
+
+            initial_metadata = bundle._ensure_version_available("1.0.0")
+            bundle._write_current_pointer(initial_metadata)
+            self.assertEqual(initial_metadata["version"], "1.0.0")
+
+            resolved_path = bundle.path
+            self.assertTrue(str(resolved_path).endswith("/1.0.0/customer_sync"))
+            self.assertEqual(bundle.get_current_version(), "1.0.0")
+
 
 def _build_demo_bundle_artifacts(temp_path, version):
     package_root = temp_path / "bundle_source" / "customer_sync"
@@ -220,7 +293,10 @@ class _FakeClient:
         return self.manifests.get(manifest_path)
 
     def download_to_path(self, artifact_path, target_path):
-        source_path = self.artifact_map[artifact_path]
+        try:
+            source_path = self.artifact_map[artifact_path]
+        except KeyError as exc:
+            raise AirflowException("Missing artifact: {0}".format(artifact_path)) from exc
         target_path = Path(target_path).expanduser().resolve()
         target_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(str(source_path), str(target_path))
