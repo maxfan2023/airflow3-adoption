@@ -206,6 +206,7 @@ class NexusDagBundle(BaseDagBundle):
         manifest_path,
         nexus_conn_id,
         cache_root,
+        cached_versions_to_keep=0,
         refresh_interval=300,
         verify_tls=True,
         repository_url=None,
@@ -229,6 +230,7 @@ class NexusDagBundle(BaseDagBundle):
         self.repository_url = str(repository_url or "").strip()
         self.timeout_seconds = int(timeout_seconds)
         self.requested_version = str(version or "").strip()
+        self.cached_versions_to_keep = int(cached_versions_to_keep or 0)
         self.cache_root = Path(cache_root).expanduser().resolve()
         self.bundle_root = self.cache_root / self.bundle_name
         self.current_pointer_path = self.bundle_root / "current.json"
@@ -512,9 +514,20 @@ class NexusDagBundle(BaseDagBundle):
         _write_json_atomic(self.current_pointer_path, metadata)
 
     def _prune_cached_versions(self, keep_versions):
+        if self.cached_versions_to_keep <= 0:
+            return
+
         keep = {str(item).strip() for item in keep_versions if str(item or "").strip()}
         if not keep:
             return
+
+        ordered_versions = []
+        for version in keep_versions:
+            normalized = str(version or "").strip()
+            if normalized and normalized not in ordered_versions:
+                ordered_versions.append(normalized)
+        keep = set(ordered_versions[: self.cached_versions_to_keep])
+
         for candidate in self.bundle_root.iterdir():
             if not candidate.is_dir():
                 continue

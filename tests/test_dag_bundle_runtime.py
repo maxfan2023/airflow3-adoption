@@ -239,6 +239,78 @@ class NexusDagBundleRuntimeTests(unittest.TestCase):
             self.assertTrue(str(resolved_path).endswith("/1.0.0/customer_sync"))
             self.assertEqual(bundle.get_current_version(), "1.0.0")
 
+    def test_bundle_keeps_all_cached_versions_when_pruning_disabled(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            artifact_map_v1, manifests_v1 = _build_demo_bundle_artifacts(temp_path / "v1", version="1.0.0")
+            artifact_map_v2, manifests_v2 = _build_demo_bundle_artifacts(temp_path / "v2", version="1.0.1")
+
+            latest_path = "com/hsbc/gdt/et/fctm/bundles/dev/customer_sync/latest.json"
+            version_path_v1 = "com/hsbc/gdt/et/fctm/bundles/dev/customer_sync/versions/1.0.0.json"
+            version_path_v2 = "com/hsbc/gdt/et/fctm/bundles/dev/customer_sync/versions/1.0.1.json"
+
+            combined_manifests = {
+                latest_path: manifests_v2[latest_path],
+                version_path_v1: manifests_v1[version_path_v1],
+                version_path_v2: manifests_v2[version_path_v2],
+            }
+            combined_artifacts = {}
+            combined_artifacts.update(artifact_map_v1)
+            combined_artifacts.update(artifact_map_v2)
+
+            bundle = NexusDagBundle(
+                bundle_name="customer_sync",
+                manifest_path=latest_path,
+                nexus_conn_id="dag_bundle_nexus_dev",
+                cache_root=temp_path / "cache",
+                repository_url="https://example.invalid/repository/raw",
+                cached_versions_to_keep=0,
+            )
+            bundle._build_client = lambda: _FakeClient(temp_path, combined_manifests, combined_artifacts)  # type: ignore[method-assign]
+
+            initial_metadata = bundle._ensure_version_available("1.0.0")
+            bundle._write_current_pointer(initial_metadata)
+            bundle.path
+
+            self.assertTrue((temp_path / "cache" / "customer_sync" / "1.0.0").is_dir())
+            self.assertTrue((temp_path / "cache" / "customer_sync" / "1.0.1").is_dir())
+
+    def test_bundle_prunes_to_requested_number_of_versions(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            artifact_map_v1, manifests_v1 = _build_demo_bundle_artifacts(temp_path / "v1", version="1.0.0")
+            artifact_map_v2, manifests_v2 = _build_demo_bundle_artifacts(temp_path / "v2", version="1.0.1")
+
+            latest_path = "com/hsbc/gdt/et/fctm/bundles/dev/customer_sync/latest.json"
+            version_path_v1 = "com/hsbc/gdt/et/fctm/bundles/dev/customer_sync/versions/1.0.0.json"
+            version_path_v2 = "com/hsbc/gdt/et/fctm/bundles/dev/customer_sync/versions/1.0.1.json"
+
+            combined_manifests = {
+                latest_path: manifests_v2[latest_path],
+                version_path_v1: manifests_v1[version_path_v1],
+                version_path_v2: manifests_v2[version_path_v2],
+            }
+            combined_artifacts = {}
+            combined_artifacts.update(artifact_map_v1)
+            combined_artifacts.update(artifact_map_v2)
+
+            bundle = NexusDagBundle(
+                bundle_name="customer_sync",
+                manifest_path=latest_path,
+                nexus_conn_id="dag_bundle_nexus_dev",
+                cache_root=temp_path / "cache",
+                repository_url="https://example.invalid/repository/raw",
+                cached_versions_to_keep=1,
+            )
+            bundle._build_client = lambda: _FakeClient(temp_path, combined_manifests, combined_artifacts)  # type: ignore[method-assign]
+
+            initial_metadata = bundle._ensure_version_available("1.0.0")
+            bundle._write_current_pointer(initial_metadata)
+            bundle.path
+
+            self.assertFalse((temp_path / "cache" / "customer_sync" / "1.0.0").is_dir())
+            self.assertTrue((temp_path / "cache" / "customer_sync" / "1.0.1").is_dir())
+
 
 def _build_demo_bundle_artifacts(temp_path, version):
     package_root = temp_path / "bundle_source" / "customer_sync"
