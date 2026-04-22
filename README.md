@@ -221,6 +221,7 @@ dag_bundle_config_list = [
       "manifest_path": "com/hsbc/gdt/et/fctm/bundles/prod/customer_sync/latest.json",
       "nexus_conn_id": "dag_bundle_nexus_prod",
       "cache_root": "/FCR_APP/abinitio/airflow/v3/dag_bundle_cache",
+      "cached_versions_to_keep": 0,
       "refresh_interval": 300,
       "verify_tls": true
     }
@@ -234,6 +235,10 @@ dag_bundle_config_list = [
 - 新机器或缓存为空时，必须先执行预热脚本，不依赖 scheduler 第一次启动时临时拉取
 - `nexus_conn_id` 对应的 Airflow Connection 需要提供 Nexus 登录凭据；推荐把 `repository_url` 放在 connection extra 里
 - `versions/<version>.json` 解决 Airflow DagRun 回读历史版本时，如何从版本号定位到 Nexus 中具体 zip 的问题
+- `cached_versions_to_keep` 控制本地缓存目录保留多少个历史版本：
+  `0` 表示不删除任何已缓存版本
+  `1` 表示只保留当前版本
+  `2` 表示保留当前版本和上一个版本
 
 ### 预热脚本默认值来源
 
