@@ -493,6 +493,144 @@ class ChecksumAndPythonCheckTests(unittest.TestCase):
             self.assertIn("STDERR log:", stdout.getvalue())
             self.assertEqual(len(sorted((temp_path / "logs").glob("*.log"))), 2)
 
+    def test_package_upload_allows_single_directory_imports_from_scripts_package(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            source_root = temp_path / "dag_bundle_testing_001"
+            scripts_dir = source_root / "scripts"
+            scripts_dir.mkdir(parents=True)
+            (scripts_dir / "__init__.py").write_text("", encoding="utf-8")
+            (scripts_dir / "script_one.py").write_text(
+                "def process_source_a():\n    return 'ok-a'\n",
+                encoding="utf-8",
+            )
+            (scripts_dir / "script_two.py").write_text(
+                "def process_source_b():\n    return 'ok-b'\n",
+                encoding="utf-8",
+            )
+            dag_file = source_root / "test_import_scripts_dag.py"
+            dag_file.write_text(
+                textwrap.dedent(
+                    """
+                    from datetime import datetime
+                    from airflow.decorators import dag, task
+                    from scripts.script_one import process_source_a
+                    from scripts.script_two import process_source_b
+
+                    GDT_ET_FEED_SOURCE = "na"
+
+                    @dag(
+                        dag_id="test_import_scripts_dag",
+                        start_date=datetime(2024, 1, 1),
+                        schedule=None,
+                        catchup=False,
+                    )
+                    def test_import_scripts_dag():
+                        @task
+                        def run_script_one():
+                            return process_source_a()
+
+                        @task
+                        def run_script_two(previous_result: str):
+                            return process_source_b() + previous_result
+
+                        run_script_two(run_script_one())
+
+                    test_import_scripts_dag()
+                    """
+                ).strip()
+                + "\n",
+                encoding="utf-8",
+            )
+            credentials_file = temp_path / "nexus_credentials.dev.env"
+            credentials_file.write_text(
+                "NEXUS_USERNAME=tester\nNEXUS_PASSWORD=secret\n",
+                encoding="utf-8",
+            )
+            fake_config = _package_validation_config()
+            fake_config.airflow_cli.temp_root = (temp_path / "airflow_cli").resolve()
+
+            calls = []
+
+            def fake_run(command, **kwargs):
+                calls.append((command, kwargs))
+                if len(calls) == 1:
+                    return subprocess.CompletedProcess(
+                        args=command,
+                        returncode=0,
+                        stdout="Database migrated.\n",
+                        stderr="",
+                    )
+
+                env = kwargs.get("env") or {}
+                staged_root = Path(env["AIRFLOW__CORE__DAGS_FOLDER"])
+                dag_path = staged_root / "test_import_scripts_dag.py"
+                scripts_path = staged_root / "scripts" / "script_one.py"
+                self.assertTrue(dag_path.is_file())
+                self.assertTrue(scripts_path.is_file())
+                airflow_pkg = staged_root / "airflow"
+                decorators_pkg = airflow_pkg / "decorators"
+                airflow_pkg.mkdir(exist_ok=True)
+                decorators_pkg.mkdir(parents=True, exist_ok=True)
+                (airflow_pkg / "__init__.py").write_text("class DAG:\n    pass\n", encoding="utf-8")
+                (
+                    decorators_pkg / "__init__.py"
+                ).write_text(
+                    "def dag(*args, **kwargs):\n"
+                    "    def wrapper(fn):\n"
+                    "        return fn\n"
+                    "    return wrapper\n\n"
+                    "def task(fn):\n"
+                    "    return fn\n",
+                    encoding="utf-8",
+                )
+
+                import importlib.util
+
+                previous_sys_path = list(sys.path)
+                sys.path.insert(0, str(staged_root))
+                try:
+                    spec = importlib.util.spec_from_file_location("test_import_scripts_dag", dag_path)
+                    module = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(module)
+                finally:
+                    sys.path[:] = previous_sys_path
+
+                return subprocess.CompletedProcess(
+                    args=command,
+                    returncode=0,
+                    stdout="[]",
+                    stderr="",
+                )
+
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with mock.patch.object(package_and_upload_dag, "load_pipeline_config", return_value=fake_config):
+                with mock.patch.object(
+                    package_and_upload_dag,
+                    "resolve_runtime_logging_settings",
+                    return_value=_runtime_logging_settings(temp_path),
+                ):
+                    with mock.patch.object(package_and_upload_dag.subprocess, "run", side_effect=fake_run):
+                        with mock.patch("sys.stdout", new=stdout), mock.patch("sys.stderr", new=stderr):
+                            exit_code = package_and_upload_main(
+                                [
+                                    str(source_root),
+                                    "--artifact-id",
+                                    "dag-test-001",
+                                    "--version",
+                                    "1.0.0",
+                                    "--credentials-file",
+                                    str(credentials_file),
+                                    "--dry-run",
+                                ]
+                            )
+
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(len(calls), 2)
+            self.assertIn("Airflow CLI validation finished.", stdout.getvalue())
+            self.assertEqual("", stderr.getvalue())
+
     def test_package_upload_warns_on_dag_variable_rule_and_can_continue(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)

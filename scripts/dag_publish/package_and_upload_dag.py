@@ -354,7 +354,8 @@ def stage_sources_for_airflow_check(sources, staging_root, excluded_python_files
         Path(item).expanduser().resolve() for item in (excluded_python_files or [])
     }
     staged_files = 0
-    for source_path, archive_entry in iter_archive_entries(sources):
+    flattened_entries = build_validation_entries(sources)
+    for source_path, archive_entry in flattened_entries:
         resolved_source = Path(source_path).expanduser().resolve()
         if resolved_source in excluded_python_files:
             debug_print(debug, "Skipped file during Airflow validation staging: {0}".format(resolved_source))
@@ -366,6 +367,32 @@ def stage_sources_for_airflow_check(sources, staging_root, excluded_python_files
         debug_print(debug, "Staged file for Airflow validation: {0} -> {1}".format(source_path, destination))
     debug_print(debug, "Prepared Airflow validation staging directory with {0} files.".format(staged_files))
     return Path(staging_root)
+
+
+def build_validation_entries(sources):
+    """Build validation staging entries.
+
+    For a single directory source, stage its contents directly under the
+    Airflow validation root so imports behave the same way as the eventual
+    bundle root at runtime.
+    """
+    sources = list(sources or [])
+    if len(sources) == 1:
+        source = Path(sources[0]).expanduser().resolve()
+        if source.is_dir():
+            entries = []
+            seen_names = set()
+            for candidate in sorted(source.rglob("*")):
+                if not candidate.is_file() or should_skip(candidate):
+                    continue
+                archive_name = candidate.relative_to(source).as_posix()
+                if archive_name in seen_names:
+                    raise ValueError("Duplicate validation entry detected: {0}".format(archive_name))
+                entries.append((candidate, archive_name))
+                seen_names.add(archive_name)
+            if entries:
+                return entries
+    return iter_archive_entries(sources)
 
 
 def collect_staged_python_files(staging_root):
