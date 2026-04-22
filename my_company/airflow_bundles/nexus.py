@@ -245,30 +245,14 @@ class NexusDagBundle(BaseDagBundle):
 
     @property
     def path(self):
-        self.initialize()
-        if self.requested_version:
-            metadata = self._ensure_version_available(self.requested_version)
-        else:
-            metadata = self._load_current_pointer()
-            if metadata is None:
-                self.refresh()
-                metadata = self._load_current_pointer()
+        metadata = self._resolve_active_metadata()
         if not metadata:
             raise AirflowException("No cached DAG bundle is available for '{0}'.".format(self.bundle_name))
         return Path(metadata["package_root"]).expanduser().resolve()
 
     def get_current_version(self):
-        self.initialize()
-        if self.requested_version:
-            return self.requested_version
-        current_pointer = self._load_current_pointer()
-        try:
-            manifest = self._fetch_latest_manifest()
-        except AirflowException:
-            if current_pointer:
-                return current_pointer["version"]
-            raise
-        return manifest.version
+        metadata = self._resolve_active_metadata()
+        return str(metadata["version"])
 
     def refresh(self):
         self.initialize()
@@ -289,7 +273,12 @@ class NexusDagBundle(BaseDagBundle):
                     return
                 raise
 
-            metadata = self._ensure_manifest_cached(manifest)
+            try:
+                metadata = self._ensure_manifest_cached(manifest)
+            except AirflowException:
+                if current_pointer and self._has_valid_cached_package(current_pointer):
+                    return
+                raise
             self._write_current_pointer(metadata)
             self._prune_cached_versions(keep_versions=[manifest.version, previous_version])
 
@@ -472,15 +461,52 @@ class NexusDagBundle(BaseDagBundle):
     def _load_current_pointer(self):
         return self._load_json_file(self.current_pointer_path)
 
+    def _resolve_active_metadata(self):
+        self.initialize()
+        if self.requested_version:
+            return self._ensure_version_available(self.requested_version)
+
+        current_pointer = self._load_current_pointer()
+        if current_pointer and not self._has_valid_cached_package(current_pointer):
+            current_pointer = None
+
+        try:
+            manifest = self._fetch_latest_manifest()
+        except AirflowException:
+            if current_pointer:
+                return current_pointer
+            raise
+
+        if current_pointer and str(current_pointer.get("version") or "").strip() == manifest.version:
+            return current_pointer
+
+        previous_version = ""
+        if current_pointer:
+            previous_version = str(current_pointer.get("version") or "").strip()
+
+        try:
+            metadata = self._ensure_manifest_cached(manifest)
+        except AirflowException:
+            if current_pointer:
+                return current_pointer
+            raise
+
+        self._write_current_pointer(metadata)
+        self._prune_cached_versions(keep_versions=[manifest.version, previous_version])
+        return metadata
+
     def _load_version_metadata(self, version):
         version_path = self.bundle_root / str(version).strip() / ".bundle-version.json"
         metadata = self._load_json_file(version_path)
         if not metadata:
             return None
-        package_root = Path(metadata.get("package_root") or "").expanduser().resolve()
-        if not package_root.is_dir():
+        if not self._has_valid_cached_package(metadata):
             return None
         return metadata
+
+    def _has_valid_cached_package(self, metadata):
+        package_root = Path(metadata.get("package_root") or "").expanduser().resolve()
+        return package_root.is_dir()
 
     def _write_current_pointer(self, metadata):
         _write_json_atomic(self.current_pointer_path, metadata)
