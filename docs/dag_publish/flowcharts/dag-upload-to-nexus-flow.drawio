@@ -1,0 +1,161 @@
+<mxfile host="app.diagrams.net" agent="Codex" version="26.1.0">
+  <diagram id="dag-upload-to-nexus" name="DAG Upload To Nexus">
+    <mxGraphModel dx="1880" dy="1060" grid="0" gridSize="10" guides="1" tooltips="1" connect="0" arrows="1" fold="0" page="0" pageScale="1" pageWidth="1880" pageHeight="1060" background="#f8f8f5" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="canvas" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8f8f5;strokeColor=none;" vertex="1" parent="1">
+          <mxGeometry x="0" y="0" width="1880" height="1060" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="frame-cli" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#d8dbde;strokeWidth=1.3;dashed=1;dashPattern=10 10;arcSize=18;" vertex="1" parent="1">
+          <mxGeometry x="40" y="54" width="380" height="910" as="geometry"/>
+        </mxCell>
+        <mxCell id="frame-validation" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#d8dbde;strokeWidth=1.3;dashed=1;dashPattern=10 10;arcSize=18;" vertex="1" parent="1">
+          <mxGeometry x="470" y="54" width="480" height="910" as="geometry"/>
+        </mxCell>
+        <mxCell id="frame-package" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#d8dbde;strokeWidth=1.3;dashed=1;dashPattern=10 10;arcSize=18;" vertex="1" parent="1">
+          <mxGeometry x="1000" y="54" width="380" height="910" as="geometry"/>
+        </mxCell>
+        <mxCell id="frame-nexus" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#d8dbde;strokeWidth=1.3;dashed=1;dashPattern=10 10;arcSize=18;" vertex="1" parent="1">
+          <mxGeometry x="1430" y="54" width="390" height="910" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="title-cli" value="CLI inputs" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=23;fontStyle=2;fontFamily=Helvetica;fontColor=#7a7f86;" vertex="1" parent="1">
+          <mxGeometry x="70" y="84" width="190" height="36" as="geometry"/>
+        </mxCell>
+        <mxCell id="title-validation" value="Validation gates" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=23;fontStyle=2;fontFamily=Helvetica;fontColor=#7a7f86;" vertex="1" parent="1">
+          <mxGeometry x="500" y="84" width="230" height="36" as="geometry"/>
+        </mxCell>
+        <mxCell id="title-package" value="Package build" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=23;fontStyle=2;fontFamily=Helvetica;fontColor=#7a7f86;" vertex="1" parent="1">
+          <mxGeometry x="1030" y="84" width="210" height="36" as="geometry"/>
+        </mxCell>
+        <mxCell id="title-nexus" value="Nexus Raw objects" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=23;fontStyle=2;fontFamily=Helvetica;fontColor=#7a7f86;" vertex="1" parent="1">
+          <mxGeometry x="1460" y="84" width="250" height="36" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="cli-invoke" value="&lt;b&gt;Run script&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:15px;font-weight:400;&quot;&gt;sources + artifact/version&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#c9c3ee;strokeWidth=1.2;arcSize=16;fontSize=20;fontStyle=1;fontFamily=Helvetica;fontColor=#3d396f;align=center;verticalAlign=middle;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="100" y="150" width="260" height="88" as="geometry"/>
+        </mxCell>
+        <mxCell id="cli-config" value="&lt;b&gt;Resolve config&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:15px;font-weight:400;&quot;&gt;environment + credentials&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fbfffd;strokeColor=#9ec9bd;strokeWidth=1.2;arcSize=16;fontSize=20;fontStyle=1;fontFamily=Helvetica;fontColor=#22574f;align=center;verticalAlign=middle;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="100" y="315" width="260" height="92" as="geometry"/>
+        </mxCell>
+        <mxCell id="cli-release" value="&lt;b&gt;Release context&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:15px;font-weight:400;&quot;&gt;bundle name, CHG, commit&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fffdfa;strokeColor=#d8bc91;strokeWidth=1.2;arcSize=16;fontSize=20;fontStyle=1;fontFamily=Helvetica;fontColor=#715426;align=center;verticalAlign=middle;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="100" y="480" width="260" height="94" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="val-syntax" value="&lt;b&gt;Python syntax&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:15px;font-weight:400;&quot;&gt;collect packaged .py + AST parse&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fbfffd;strokeColor=#9ec9bd;strokeWidth=1.2;arcSize=16;fontSize=20;fontStyle=1;fontFamily=Helvetica;fontColor=#22574f;align=center;verticalAlign=middle;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="545" y="132" width="330" height="90" as="geometry"/>
+        </mxCell>
+        <mxCell id="val-airflow" value="&lt;b&gt;Airflow CLI check&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:15px;font-weight:400;&quot;&gt;temp DB + list-import-errors&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fffdfa;strokeColor=#d8bc91;strokeWidth=1.2;arcSize=16;fontSize=20;fontStyle=1;fontFamily=Helvetica;fontColor=#715426;align=center;verticalAlign=middle;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="545" y="310" width="330" height="94" as="geometry"/>
+        </mxCell>
+        <mxCell id="val-rules" value="&lt;b&gt;DAG rule check&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:15px;font-weight:400;&quot;&gt;dag_id / queue / top-level vars&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fffdfc;strokeColor=#dfb7ae;strokeWidth=1.2;arcSize=16;fontSize=20;fontStyle=1;fontFamily=Helvetica;fontColor=#74463d;align=center;verticalAlign=middle;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="545" y="488" width="330" height="94" as="geometry"/>
+        </mxCell>
+        <mxCell id="val-operator" value="&lt;b&gt;Issue gate&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:15px;font-weight:400;&quot;&gt;show findings, operator types go or aborts&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d2cef0;strokeWidth=1.15;arcSize=16;fontSize=19;fontStyle=1;fontFamily=Helvetica;fontColor=#55517f;align=center;verticalAlign=middle;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="560" y="736" width="300" height="104" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="pkg-archive" value="&lt;b&gt;Create ZIP&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:15px;font-weight:400;&quot;&gt;preserve archive entries&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fffdfd;strokeColor=#d5b2bd;strokeWidth=1.2;arcSize=16;fontSize=20;fontStyle=1;fontFamily=Helvetica;fontColor=#723f49;align=center;verticalAlign=middle;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="1045" y="155" width="290" height="90" as="geometry"/>
+        </mxCell>
+        <mxCell id="pkg-sha" value="&lt;b&gt;Compute SHA256&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:15px;font-weight:400;&quot;&gt;write .zip.sha256 sidecar&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fffffd;strokeColor=#c8c4b6;strokeWidth=1.2;arcSize=16;fontSize=20;fontStyle=1;fontFamily=Helvetica;fontColor=#5e5a50;align=center;verticalAlign=middle;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="1045" y="325" width="290" height="88" as="geometry"/>
+        </mxCell>
+        <mxCell id="pkg-metadata" value="&lt;b&gt;Build metadata&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:15px;font-weight:400;&quot;&gt;version, release, latest manifest&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f9fbff;strokeColor=#adc0da;strokeWidth=1.2;arcSize=16;fontSize=20;fontStyle=1;fontFamily=Helvetica;fontColor=#354c66;align=center;verticalAlign=middle;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="1045" y="500" width="290" height="98" as="geometry"/>
+        </mxCell>
+        <mxCell id="pkg-dryrun" value="&lt;b&gt;dry-run?&lt;/b&gt;" style="rhombus;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d8bc91;strokeWidth=1.2;fontSize=18;fontStyle=1;fontFamily=Helvetica;fontColor=#715426;align=center;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="1115" y="680" width="150" height="96" as="geometry"/>
+        </mxCell>
+        <mxCell id="pkg-print" value="&lt;b&gt;Print targets&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:15px;font-weight:400;&quot;&gt;archive path + Nexus URLs&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fcfffd;strokeColor=#afc4b7;strokeWidth=1.2;arcSize=16;fontSize=20;fontStyle=1;fontFamily=Helvetica;fontColor=#315244;align=center;verticalAlign=middle;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="1045" y="835" width="290" height="86" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="nexus-zip" value="&lt;b&gt;Bundle ZIP&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:15px;font-weight:400;&quot;&gt;artifact.version.zip&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fffdfd;strokeColor=#d5b2bd;strokeWidth=1.2;arcSize=16;fontSize=20;fontStyle=1;fontFamily=Helvetica;fontColor=#723f49;align=center;verticalAlign=middle;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="1485" y="126" width="280" height="82" as="geometry"/>
+        </mxCell>
+        <mxCell id="nexus-sidecar" value="&lt;b&gt;Checksum sidecar&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:15px;font-weight:400;&quot;&gt;.zip.sha256&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fffffd;strokeColor=#c8c4b6;strokeWidth=1.2;arcSize=16;fontSize=20;fontStyle=1;fontFamily=Helvetica;fontColor=#5e5a50;align=center;verticalAlign=middle;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="1485" y="260" width="280" height="82" as="geometry"/>
+        </mxCell>
+        <mxCell id="nexus-version" value="&lt;b&gt;Version record&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:15px;font-weight:400;&quot;&gt;versions/&amp;lt;version&amp;gt;.json&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f9fbff;strokeColor=#adc0da;strokeWidth=1.2;arcSize=16;fontSize=20;fontStyle=1;fontFamily=Helvetica;fontColor=#354c66;align=center;verticalAlign=middle;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="1485" y="394" width="280" height="82" as="geometry"/>
+        </mxCell>
+        <mxCell id="nexus-release" value="&lt;b&gt;Release record&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:15px;font-weight:400;&quot;&gt;releases/&amp;lt;time&amp;gt;.json&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fffdfa;strokeColor=#d8bc91;strokeWidth=1.2;arcSize=16;fontSize=20;fontStyle=1;fontFamily=Helvetica;fontColor=#715426;align=center;verticalAlign=middle;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="1485" y="528" width="280" height="82" as="geometry"/>
+        </mxCell>
+        <mxCell id="nexus-latest" value="&lt;b&gt;Latest manifest&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:15px;font-weight:400;&quot;&gt;latest.json pointer&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fbfffd;strokeColor=#9ec9bd;strokeWidth=1.2;arcSize=16;fontSize=20;fontStyle=1;fontFamily=Helvetica;fontColor=#22574f;align=center;verticalAlign=middle;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="1485" y="662" width="280" height="82" as="geometry"/>
+        </mxCell>
+        <mxCell id="nexus-runtime" value="&lt;b&gt;Runtime pointer&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:15px;font-weight:400;&quot;&gt;Airflow reads manifest later&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d2cef0;strokeWidth=1.15;arcSize=16;fontSize=19;fontStyle=1;fontFamily=Helvetica;fontColor=#55517f;align=center;verticalAlign=middle;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="1485" y="842" width="280" height="78" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="edge-cli-config" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=blockThin;endFill=1;endSize=9;strokeColor=#a2a8af;strokeWidth=1.5;" edge="1" parent="1" source="cli-invoke" target="cli-config">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge-config-release" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=blockThin;endFill=1;endSize=9;strokeColor=#a2a8af;strokeWidth=1.5;" edge="1" parent="1" source="cli-config" target="cli-release">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge-release-syntax" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=blockThin;endFill=1;endSize=9;strokeColor=#a2a8af;strokeWidth=1.5;" edge="1" parent="1" source="cli-release" target="val-syntax">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="445" y="527"/>
+              <mxPoint x="445" y="177"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="edge-syntax-airflow" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=blockThin;endFill=1;endSize=9;strokeColor=#a2a8af;strokeWidth=1.5;" edge="1" parent="1" source="val-syntax" target="val-airflow">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge-airflow-rules" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=blockThin;endFill=1;endSize=9;strokeColor=#a2a8af;strokeWidth=1.5;" edge="1" parent="1" source="val-airflow" target="val-rules">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge-rules-archive" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=blockThin;endFill=1;endSize=9;strokeColor=#a2a8af;strokeWidth=1.5;" edge="1" parent="1" source="val-rules" target="pkg-archive">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="975" y="535"/>
+              <mxPoint x="975" y="200"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="edge-archive-sha" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=blockThin;endFill=1;endSize=9;strokeColor=#a2a8af;strokeWidth=1.5;" edge="1" parent="1" source="pkg-archive" target="pkg-sha">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge-sha-metadata" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=blockThin;endFill=1;endSize=9;strokeColor=#a2a8af;strokeWidth=1.5;" edge="1" parent="1" source="pkg-sha" target="pkg-metadata">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge-metadata-dryrun" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=blockThin;endFill=1;endSize=9;strokeColor=#a2a8af;strokeWidth=1.5;" edge="1" parent="1" source="pkg-metadata" target="pkg-dryrun">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge-dryrun-print" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=blockThin;endFill=1;endSize=9;strokeColor=#a2a8af;strokeWidth=1.5;" edge="1" parent="1" source="pkg-dryrun" target="pkg-print">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge-dryrun-upload" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=blockThin;endFill=1;endSize=9;strokeColor=#a2a8af;strokeWidth=1.5;" edge="1" parent="1" source="pkg-dryrun" target="nexus-zip">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1405" y="728"/>
+              <mxPoint x="1405" y="167"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="edge-zip-sidecar" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=blockThin;endFill=1;endSize=9;strokeColor=#a2a8af;strokeWidth=1.5;" edge="1" parent="1" source="nexus-zip" target="nexus-sidecar">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge-sidecar-version" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=blockThin;endFill=1;endSize=9;strokeColor=#a2a8af;strokeWidth=1.5;" edge="1" parent="1" source="nexus-sidecar" target="nexus-version">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge-version-release" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=blockThin;endFill=1;endSize=9;strokeColor=#a2a8af;strokeWidth=1.5;" edge="1" parent="1" source="nexus-version" target="nexus-release">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge-release-latest" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=blockThin;endFill=1;endSize=9;strokeColor=#a2a8af;strokeWidth=1.5;" edge="1" parent="1" source="nexus-release" target="nexus-latest">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge-latest-runtime" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=blockThin;endFill=1;endSize=9;strokeColor=#a2a8af;strokeWidth=1.5;" edge="1" parent="1" source="nexus-latest" target="nexus-runtime">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
