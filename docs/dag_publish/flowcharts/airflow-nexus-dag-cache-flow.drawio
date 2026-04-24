@@ -1,0 +1,151 @@
+<mxfile host="app.diagrams.net" agent="Codex" version="26.1.0">
+  <diagram id="airflow-nexus-cache" name="Airflow Nexus DAG Cache">
+    <mxGraphModel dx="1880" dy="1060" grid="0" gridSize="10" guides="1" tooltips="1" connect="0" arrows="1" fold="0" page="0" pageScale="1" pageWidth="1880" pageHeight="1060" background="#f8f8f5" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="canvas" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8f8f5;strokeColor=none;" vertex="1" parent="1">
+          <mxGeometry x="0" y="0" width="1880" height="1060" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="frame-runtime" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#d8dbde;strokeWidth=1.3;dashed=1;dashPattern=10 10;arcSize=18;" vertex="1" parent="1">
+          <mxGeometry x="40" y="54" width="440" height="910" as="geometry"/>
+        </mxCell>
+        <mxCell id="frame-nexus" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#d8dbde;strokeWidth=1.3;dashed=1;dashPattern=10 10;arcSize=18;" vertex="1" parent="1">
+          <mxGeometry x="530" y="54" width="360" height="910" as="geometry"/>
+        </mxCell>
+        <mxCell id="frame-cache" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#d8dbde;strokeWidth=1.3;dashed=1;dashPattern=10 10;arcSize=18;" vertex="1" parent="1">
+          <mxGeometry x="940" y="54" width="480" height="910" as="geometry"/>
+        </mxCell>
+        <mxCell id="frame-serving" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#d8dbde;strokeWidth=1.3;dashed=1;dashPattern=10 10;arcSize=18;" vertex="1" parent="1">
+          <mxGeometry x="1470" y="54" width="360" height="910" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="title-runtime" value="Airflow runtime" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=23;fontStyle=2;fontFamily=Helvetica;fontColor=#7a7f86;" vertex="1" parent="1">
+          <mxGeometry x="70" y="84" width="230" height="36" as="geometry"/>
+        </mxCell>
+        <mxCell id="title-nexus" value="Nexus lookup" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=23;fontStyle=2;fontFamily=Helvetica;fontColor=#7a7f86;" vertex="1" parent="1">
+          <mxGeometry x="560" y="84" width="210" height="36" as="geometry"/>
+        </mxCell>
+        <mxCell id="title-cache" value="Cache build" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=23;fontStyle=2;fontFamily=Helvetica;fontColor=#7a7f86;" vertex="1" parent="1">
+          <mxGeometry x="970" y="84" width="190" height="36" as="geometry"/>
+        </mxCell>
+        <mxCell id="title-serving" value="Serve or fall back" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=23;fontStyle=2;fontFamily=Helvetica;fontColor=#7a7f86;" vertex="1" parent="1">
+          <mxGeometry x="1500" y="84" width="240" height="36" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="runtime-path" value="&lt;b&gt;Airflow asks path&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:15px;font-weight:400;&quot;&gt;NexusDagBundle.path / refresh()&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#c9c3ee;strokeWidth=1.2;arcSize=16;fontSize=20;fontStyle=1;fontFamily=Helvetica;fontColor=#3d396f;align=center;verticalAlign=middle;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="100" y="140" width="310" height="90" as="geometry"/>
+        </mxCell>
+        <mxCell id="runtime-init" value="&lt;b&gt;initialize()&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:15px;font-weight:400;&quot;&gt;create cache root + lock file&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fbfffd;strokeColor=#9ec9bd;strokeWidth=1.2;arcSize=16;fontSize=20;fontStyle=1;fontFamily=Helvetica;fontColor=#22574f;align=center;verticalAlign=middle;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="100" y="300" width="310" height="90" as="geometry"/>
+        </mxCell>
+        <mxCell id="runtime-pinned" value="&lt;b&gt;Resolve bundle mode&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:15px;font-weight:400;&quot;&gt;latest.json or requested version&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fffdfa;strokeColor=#d8bc91;strokeWidth=1.2;arcSize=16;fontSize=20;fontStyle=1;fontFamily=Helvetica;fontColor=#715426;align=center;verticalAlign=middle;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="100" y="465" width="310" height="96" as="geometry"/>
+        </mxCell>
+        <mxCell id="runtime-current" value="&lt;b&gt;Load current.json&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:15px;font-weight:400;&quot;&gt;accept only valid package_root&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fffffd;strokeColor=#c8c4b6;strokeWidth=1.2;arcSize=16;fontSize=20;fontStyle=1;fontFamily=Helvetica;fontColor=#5e5a50;align=center;verticalAlign=middle;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="100" y="650" width="310" height="92" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="nexus-latest" value="&lt;b&gt;Read manifest index&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:15px;font-weight:400;&quot;&gt;latest.json or versions/&amp;lt;version&amp;gt;.json&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fbfffd;strokeColor=#9ec9bd;strokeWidth=1.2;arcSize=16;fontSize=20;fontStyle=1;fontFamily=Helvetica;fontColor=#22574f;align=center;verticalAlign=middle;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="565" y="150" width="290" height="104" as="geometry"/>
+        </mxCell>
+        <mxCell id="nexus-manifest" value="&lt;b&gt;BundleManifest&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:15px;font-weight:400;&quot;&gt;artifact_path + sha256 + release data&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fffdfa;strokeColor=#d8bc91;strokeWidth=1.2;arcSize=16;fontSize=20;fontStyle=1;fontFamily=Helvetica;fontColor=#715426;align=center;verticalAlign=middle;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="565" y="540" width="290" height="100" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="cache-lock" value="&lt;b&gt;Acquire bundle lock&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:15px;font-weight:400;&quot;&gt;avoid duplicate downloads&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#c9c3ee;strokeWidth=1.2;arcSize=16;fontSize=20;fontStyle=1;fontFamily=Helvetica;fontColor=#3d396f;align=center;verticalAlign=middle;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="1015" y="132" width="330" height="86" as="geometry"/>
+        </mxCell>
+        <mxCell id="cache-download" value="&lt;b&gt;Download bundle&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:15px;font-weight:400;&quot;&gt;ZIP + .sha256 into .tmp&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fffdfd;strokeColor=#d5b2bd;strokeWidth=1.2;arcSize=16;fontSize=20;fontStyle=1;fontFamily=Helvetica;fontColor=#723f49;align=center;verticalAlign=middle;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="1015" y="285" width="330" height="92" as="geometry"/>
+        </mxCell>
+        <mxCell id="cache-verify" value="&lt;b&gt;Verify checksums&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:15px;font-weight:400;&quot;&gt;sidecar hash, then archive SHA256&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fffffd;strokeColor=#c8c4b6;strokeWidth=1.2;arcSize=16;fontSize=20;fontStyle=1;fontFamily=Helvetica;fontColor=#5e5a50;align=center;verticalAlign=middle;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="1015" y="450" width="330" height="92" as="geometry"/>
+        </mxCell>
+        <mxCell id="cache-extract" value="&lt;b&gt;Safe extract&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:15px;font-weight:400;&quot;&gt;single top-level directory, no unsafe paths&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fffdfc;strokeColor=#dfb7ae;strokeWidth=1.2;arcSize=16;fontSize=20;fontStyle=1;fontFamily=Helvetica;fontColor=#74463d;align=center;verticalAlign=middle;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="1015" y="615" width="330" height="94" as="geometry"/>
+        </mxCell>
+        <mxCell id="cache-install" value="&lt;b&gt;Install cache&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:15px;font-weight:400;&quot;&gt;&amp;lt;cache&amp;gt;/&amp;lt;bundle&amp;gt;/&amp;lt;version&amp;gt;&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fbfffd;strokeColor=#9ec9bd;strokeWidth=1.2;arcSize=16;fontSize=20;fontStyle=1;fontFamily=Helvetica;fontColor=#22574f;align=center;verticalAlign=middle;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="1015" y="790" width="330" height="104" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="serving-cached" value="&lt;b&gt;Cache hit&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:15px;font-weight:400;&quot;&gt;valid metadata returns immediately&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d2cef0;strokeWidth=1.15;arcSize=16;fontSize=19;fontStyle=1;fontFamily=Helvetica;fontColor=#55517f;align=center;verticalAlign=middle;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="1525" y="140" width="260" height="92" as="geometry"/>
+        </mxCell>
+        <mxCell id="serving-return" value="&lt;b&gt;Return package_root&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:15px;font-weight:400;&quot;&gt;Airflow imports DAGs here&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#c9c3ee;strokeWidth=1.2;arcSize=16;fontSize=20;fontStyle=1;fontFamily=Helvetica;fontColor=#3d396f;align=center;verticalAlign=middle;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="1525" y="308" width="260" height="104" as="geometry"/>
+        </mxCell>
+        <mxCell id="serving-pointer" value="&lt;b&gt;Write current.json&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:15px;font-weight:400;&quot;&gt;latest-version pointer&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f9fbff;strokeColor=#adc0da;strokeWidth=1.2;arcSize=16;fontSize=20;fontStyle=1;fontFamily=Helvetica;fontColor=#354c66;align=center;verticalAlign=middle;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="1525" y="493" width="260" height="104" as="geometry"/>
+        </mxCell>
+        <mxCell id="serving-prune" value="&lt;b&gt;Prune cache&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:15px;font-weight:400;&quot;&gt;keep latest and previous&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fffffd;strokeColor=#c8c4b6;strokeWidth=1.2;arcSize=16;fontSize=20;fontStyle=1;fontFamily=Helvetica;fontColor=#5e5a50;align=center;verticalAlign=middle;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="1525" y="675" width="260" height="86" as="geometry"/>
+        </mxCell>
+        <mxCell id="serving-fallback" value="&lt;b&gt;Failure path&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:15px;font-weight:400;&quot;&gt;reuse valid current; otherwise raise&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fffdfc;strokeColor=#dfb7ae;strokeWidth=1.2;arcSize=16;fontSize=19;fontStyle=1;fontFamily=Helvetica;fontColor=#74463d;align=center;verticalAlign=middle;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="1525" y="828" width="260" height="104" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="edge-path-init" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=blockThin;endFill=1;endSize=9;strokeColor=#a2a8af;strokeWidth=1.5;" edge="1" parent="1" source="runtime-path" target="runtime-init">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge-init-pinned" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=blockThin;endFill=1;endSize=9;strokeColor=#a2a8af;strokeWidth=1.5;" edge="1" parent="1" source="runtime-init" target="runtime-pinned">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge-pinned-current" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=blockThin;endFill=1;endSize=9;strokeColor=#a2a8af;strokeWidth=1.5;" edge="1" parent="1" source="runtime-pinned" target="runtime-current">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge-current-latest" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=blockThin;endFill=1;endSize=9;strokeColor=#a2a8af;strokeWidth=1.5;" edge="1" parent="1" source="runtime-current" target="nexus-latest">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="505" y="696"/>
+              <mxPoint x="505" y="202"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="edge-latest-manifest" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=blockThin;endFill=1;endSize=9;strokeColor=#a2a8af;strokeWidth=1.5;" edge="1" parent="1" source="nexus-latest" target="nexus-manifest">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge-manifest-lock" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=blockThin;endFill=1;endSize=9;strokeColor=#a2a8af;strokeWidth=1.5;" edge="1" parent="1" source="nexus-manifest" target="cache-lock">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="920" y="590"/>
+              <mxPoint x="920" y="175"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="edge-lock-download" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=blockThin;endFill=1;endSize=9;strokeColor=#a2a8af;strokeWidth=1.5;" edge="1" parent="1" source="cache-lock" target="cache-download">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge-download-verify" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=blockThin;endFill=1;endSize=9;strokeColor=#a2a8af;strokeWidth=1.5;" edge="1" parent="1" source="cache-download" target="cache-verify">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge-verify-extract" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=blockThin;endFill=1;endSize=9;strokeColor=#a2a8af;strokeWidth=1.5;" edge="1" parent="1" source="cache-verify" target="cache-extract">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge-extract-install" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=blockThin;endFill=1;endSize=9;strokeColor=#a2a8af;strokeWidth=1.5;" edge="1" parent="1" source="cache-extract" target="cache-install">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge-install-pointer" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=blockThin;endFill=1;endSize=9;strokeColor=#a2a8af;strokeWidth=1.5;" edge="1" parent="1" source="cache-install" target="serving-pointer">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1450" y="842"/>
+              <mxPoint x="1450" y="545"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="edge-pointer-prune" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=blockThin;endFill=1;endSize=9;strokeColor=#a2a8af;strokeWidth=1.5;" edge="1" parent="1" source="serving-pointer" target="serving-prune">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge-prune-return" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=blockThin;endFill=1;endSize=9;strokeColor=#a2a8af;strokeWidth=1.5;" edge="1" parent="1" source="serving-prune" target="serving-return">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1845" y="718"/>
+              <mxPoint x="1845" y="360"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
